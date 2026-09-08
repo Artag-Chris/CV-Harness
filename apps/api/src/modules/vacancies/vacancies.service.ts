@@ -79,7 +79,7 @@ export class VacanciesService {
     return vacancy;
   }
 
-  async setStatus(id: string, status: 'APPLIED' | 'IGNORED') {
+  async setStatus(id: string, status: 'APPLIED' | 'IGNORED', profileId?: string) {
     const vacancy = await this.prisma.vacancy.findUnique({ where: { id } });
     if (!vacancy) throw new NotFoundException(`Vacancy ${id} no existe`);
     return this.prisma.vacancy.update({

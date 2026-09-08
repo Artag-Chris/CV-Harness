@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 
 /** Polling simple cada `intervalMs` (patrón del dashboard de atiende). */
-export function usePoll<T>(fn: () => Promise<T>, intervalMs: number) {
+export function usePoll<T>(
+  fn: () => Promise<T>,
+  intervalMs: number,
+  deps: unknown[] = [],
+) {
   const fnRef = useRef(fn);
   fnRef.current = fn;
   const [data, setData] = useState<T | null>(null);
@@ -21,13 +25,16 @@ export function usePoll<T>(fn: () => Promise<T>, intervalMs: number) {
         if (alive) setError(e instanceof Error ? e.message : String(e));
       }
     };
+    // Reinicio al cambiar de perfil/fuente (deps externas).
+    setData(null);
     void run();
     const id = window.setInterval(() => void run(), intervalMs);
     return () => {
       alive = false;
       window.clearInterval(id);
     };
-  }, [intervalMs, version]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intervalMs, version, ...deps]);
 
   return { data, error, reload: () => setVersion((v) => v + 1) };
 }

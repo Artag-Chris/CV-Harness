@@ -25,6 +25,9 @@ model Profile {
   languages Json     @default("[]")
   softSkills Json    @default("[]")
   isPrimary Boolean  @default(false)
+  // Cron por perfil: cada cuántos minutos se corre la búsqueda de SUS fuentes.
+  scheduleMinutes Int?
+  nextRunAt       DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -36,8 +39,61 @@ model Profile {
   sources     Source[]
   vacancies   Vacancy[]
   resumeDrafts ResumeDraft[]
+  resumes     Resume[]
 
   @@index([isPrimary])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hojas de vida cargadas desde el dashboard (indexadas en pgvector)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum ResumeStatus {
+  PENDING
+  EMBEDDING
+  READY
+  FAILED
+}
+
+enum ResumeKind {
+  PDF
+  MARKDOWN
+  TEXT
+}
+
+model Resume {
+  id        String       @id @default(cuid())
+  profileId String
+  name      String
+  kind      ResumeKind
+  filename  String? // nombre original si se subió un archivo
+  rawText   String       @db.Text
+  status    ResumeStatus @default(PENDING)
+  error     String?
+  active    Boolean      @default(false) // solo una activa por perfil (app-level)
+  chunkCount Int         @default(0)
+  version   Int          @default(1)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  profile Profile    @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  chunks  ResumeChunk[]
+
+  @@index([profileId, active])
+}
+
+model ResumeChunk {
+  id        String   @id @default(cuid())
+  resumeId  String
+  index     Int
+  content   String   @db.Text
+  // Vector de pgvector (text-embedding-3-small → 1536). Se escribe/lee con SQL
+  // crudo ($executeRaw/$queryRaw) porque Prisma no lo tipa.
+  embedding Unsupported("vector(1536)")?
+
+  resume Resume @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+
+  @@index([resumeId, index])
 }
 
 model Experience {
@@ -217,7 +273,12 @@ model Vacancy {
 model MatchResult {
   id        String    @id @default(cuid())
   vacancyId String    @unique
+  // score final = blend(analysisScore, semanticScore) o analysisScore si no hay CV indexado.
   score     Int
+  // Score del análisis con IA (o determinístico en modo mock).
+  analysisScore Int?
+  // Similitud vectorial CV↔vacante (0-100). null si el perfil no tiene CV activo.
+  semanticScore Int?
   verdict   String // GOOD_MATCH | POSSIBLE | WEAK
   reasons   Json      @default("[]")
   gaps      Json      @default("[]")

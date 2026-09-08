@@ -184,6 +184,7 @@ async fn handle_message(
 
     let outcome = match engine::run(&req, http).await {
         Ok(items) => ScrapeResults {
+            schema_version: Some("1".to_string()),
             request_id: req.request_id.clone(),
             source_id: req.source_id.clone(),
             error: None,
@@ -192,6 +193,7 @@ async fn handle_message(
         Err(message) => {
             error!(request_id = %req.request_id, error = %message, "scraping falló");
             ScrapeResults {
+                schema_version: Some("1".to_string()),
                 request_id: req.request_id.clone(),
                 source_id: req.source_id.clone(),
                 error: Some(message),

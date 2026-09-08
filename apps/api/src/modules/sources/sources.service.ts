@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   NotFoundException,
@@ -18,19 +19,83 @@ const LimitsSchema = z
   })
   .default({});
 
+/**
+ * Plantillas de portales para crear fuentes pegando solo la URL del listado.
+ * El editor avanzado de selectores CSS queda disponible por API.
+ */
+export interface SourceTemplate {
+  id: string;
+  label: string;
+  hint: string;
+  baseUrlDefault: string;
+  selectors: Record<string, unknown>;
+  limits: Record<string, unknown>;
+}
+
+export const SOURCE_TEMPLATES: SourceTemplate[] = [
+  {
+    id: 'computrabajo-co',
+    label: 'Computrabajo Colombia',
+    hint: 'URL del listado, ej. https://www.computrabajo.com.co/trabajo-de-desarrollador-y-programador',
+    baseUrlDefault: 'https://www.computrabajo.com.co',
+    selectors: {
+      item: 'article.box_oferta, .b-ox-oferta',
+      title: 'h2 a, .tOferta a',
+      company: '.dataOferta .e, .dOferta .e',
+      location: '.dataOferta .d, .lc',
+      postedAt: '.dataOferta .f, .fc',
+      description: '.dOferta .fs16, .cOferta',
+      applyUrl: 'h2 a',
+      nextPage: 'a[title="Siguiente"]',
+      fetchDetail: true,
+      detail: { description: '.box_detalle_oferta, .ficha_oferta' },
+    },
+    limits: {
+      maxPages: 2,
+      delayMs: 1500,
+      timeoutMs: 20000,
+      userAgent: 'cv-harness/0.1 (+tracker personal de vacantes)',
+      respectRobots: true,
+    },
+  },
+  {
+    id: 'jobsdev-fixture',
+    label: 'JobsDev Fixture (E2E local)',
+    hint: 'http://cvharness-fixture/jobs.html dentro de docker, o localhost:8090/jobs.html nativo',
+    baseUrlDefault: 'http://cvharness-fixture',
+    selectors: {
+      item: '.job-item',
+      title: '.job-title a',
+      company: '.job-company',
+      location: '.job-location',
+      postedAt: '.job-date',
+      description: '.job-description',
+      applyUrl: '.job-title a',
+    },
+    limits: { maxPages: 1, delayMs: 300, timeoutMs: 15000, respectRobots: false },
+  },
+];
+
 export const UpsertSourceSchema = z.object({
   name: z.string().min(1),
   kind: z.string().default('HTML_RECIPE'),
-  baseUrl: z.string().url(),
+  // Plantilla + URL (dashboard) o selectores manuales (API avanzada).
+  templateId: z.string().optional(),
+  baseUrl: z.string().url().optional(),
   listUrl: z.string().url(),
-  selectors: SelectorRecipeSchema,
-  limits: LimitsSchema,
+  selectors: SelectorRecipeSchema.optional(),
+  limits: LimitsSchema.optional(),
   enabled: z.boolean().default(true),
   intervalMinutes: z.number().int().positive().default(1440),
   profileId: z.string().nullable().optional(),
 });
 
 export type UpsertSourceInput = z.infer<typeof UpsertSourceSchema>;
+
+function resolveTemplate(templateId: string | undefined) {
+  if (!templateId) return null;
+  return SOURCE_TEMPLATES.find((t) => t.id === templateId) ?? null;
+}
 
 @Injectable()
 export class SourcesService {
@@ -39,7 +104,25 @@ export class SourcesService {
   async list(): Promise<Source[]> {
     return this.prisma.source.findMany({
       orderBy: { createdAt: 'asc' },
-      include: { _count: { select: { vacancies: true } } },
+      include: {
+        _count: { select: { vacancies: true } },
+        profile: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  templates(): SourceTemplate[] {
+    return SOURCE_TEMPLATES;
+  }
+
+  async listByProfile(profileId: string): Promise<Source[]> {
+    return this.prisma.source.findMany({
+      where: { profileId },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        _count: { select: { vacancies: true } },
+        profile: { select: { id: true, name: true } },
+      },
     });
   }
 
@@ -51,14 +134,22 @@ export class SourcesService {
 
   async create(input: unknown): Promise<Source> {
     const data = UpsertSourceSchema.parse(input);
+    const template = resolveTemplate(data.templateId);
+    if (!data.selectors && !template) {
+      throw new BadRequestException(
+        'Se necesita "templateId" (plantilla) o "selectors" (editor avanzado)',
+      );
+    }
+    const selectors = data.selectors ?? template?.selectors ?? {};
+    const limits = data.limits ?? template?.limits ?? {};
     return this.prisma.source.create({
       data: {
         name: data.name,
         kind: data.kind,
-        baseUrl: data.baseUrl,
+        baseUrl: data.baseUrl ?? template?.baseUrlDefault ?? '',
         listUrl: data.listUrl,
-        selectors: data.selectors as Prisma.InputJsonValue,
-        limits: data.limits as Prisma.InputJsonValue,
+        selectors: selectors as Prisma.InputJsonValue,
+        limits: limits as Prisma.InputJsonValue,
         enabled: data.enabled,
         intervalMinutes: data.intervalMinutes,
         profileId: data.profileId ?? null,

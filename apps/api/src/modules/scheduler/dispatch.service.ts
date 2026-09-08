@@ -14,6 +14,8 @@ export type CrawlJobData =
   | { type: 'source'; sourceId: string };
 
 export interface ScrapeRequestPayload {
+  // Versión del contrato del stream (ver docs/event-flow.md).
+  schemaVersion: '1';
   requestId: string;
   sourceId: string;
   sourceName: string;
@@ -38,13 +40,16 @@ export class DispatchService {
     private readonly logger: JsonLogger,
   ) {}
 
-  /** Ciclo del cron: despacha todas las fuentes habilitadas y vencidas. */
+  /** Ciclo del cron: despacha las fuentes vencidas y los perfiles con cron propio. */
   async runCycle(): Promise<number> {
-    const due = await this.prisma.source.findMany({
-      where: { enabled: true, nextRunAt: { lte: new Date() } },
-    });
+    const now = new Date();
     let dispatched = 0;
-    for (const source of due) {
+
+    // 1) Fuentes vencidas por su propia cadencia.
+    const dueSources = await this.prisma.source.findMany({
+      where: { enabled: true, nextRunAt: { lte: now } },
+    });
+    for (const source of dueSources) {
       try {
         await this.dispatchSource(source);
         dispatched += 1;
@@ -55,11 +60,63 @@ export class DispatchService {
         );
       }
     }
-    if (due.length > 0) {
+
+    // 2) Perfiles con cron propio (scheduleMinutes): corren TODAS sus fuentes.
+    const dueProfiles = await this.prisma.profile.findMany({
+      where: {
+        scheduleMinutes: { not: null },
+        nextRunAt: { lte: now },
+      },
+      include: { sources: { where: { enabled: true } } },
+    });
+    for (const profile of dueProfiles) {
+      dispatched += await this.dispatchProfileSources(profile.id, profile.sources);
+      const interval = profile.scheduleMinutes ?? 0;
+      await this.prisma.profile.update({
+        where: { id: profile.id },
+        data: { nextRunAt: new Date(now.getTime() + interval * 60_000) },
+      });
+    }
+
+    if (dueSources.length + dueProfiles.length > 0) {
       this.logger.log(
-        { msg: 'crawl-cycle done', sourcesDue: due.length, dispatched },
+        { msg: 'crawl-cycle done', sourcesDue: dueSources.length, profilesDue: dueProfiles.length, dispatched },
         DispatchService.name,
       );
+    }
+    return dispatched;
+  }
+
+  /** Búsqueda manual de un perfil: despacha todas sus fuentes habilitadas. */
+  async runProfile(profileId: string): Promise<{ dispatched: number }> {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
+      include: { sources: { where: { enabled: true } } },
+    });
+    if (!profile) throw new NotFoundException(`Profile ${profileId} no existe`);
+    const dispatched = await this.dispatchProfileSources(profile.id, profile.sources);
+    return { dispatched };
+  }
+
+  /**
+   * Despacha las fuentes de un perfil saltándose su nextRunAt individual
+   * (el cron del perfil manda).
+   */
+  private async dispatchProfileSources(
+    profileId: string,
+    sources: Source[],
+  ): Promise<number> {
+    let dispatched = 0;
+    for (const source of sources) {
+      try {
+        await this.dispatchSource(source);
+        dispatched += 1;
+      } catch (err) {
+        this.logger.error(
+          { msg: 'dispatch failed (perfil)', profileId, sourceId: source.id, err: String(err) },
+          DispatchService.name,
+        );
+      }
     }
     return dispatched;
   }
@@ -80,6 +137,7 @@ export class DispatchService {
     });
 
     const payload: ScrapeRequestPayload = {
+      schemaVersion: '1',
       requestId,
       sourceId: source.id,
       sourceName: source.name,

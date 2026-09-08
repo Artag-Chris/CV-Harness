@@ -124,6 +124,8 @@ pub struct ScrapedItem {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScrapeResults {
+    /// Versión del contrato del stream.
+    pub schema_version: Option<String>,
     pub request_id: String,
     pub source_id: Option<String>,
     pub error: Option<String>,

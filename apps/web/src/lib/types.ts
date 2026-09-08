@@ -6,9 +6,47 @@ export interface SourceRow {
   listUrl: string;
   enabled: boolean;
   intervalMinutes: number;
+  profileId: string | null;
   lastRunAt: string | null;
   nextRunAt: string;
   _count?: { vacancies: number };
+  profile?: { id: string; name: string } | null;
+}
+
+export interface SourceTemplate {
+  id: string;
+  label: string;
+  hint: string;
+}
+
+export interface ProfileRow {
+  id: string;
+  name: string;
+  headline: string[];
+  email: string | null;
+  isPrimary: boolean;
+  scheduleMinutes: number | null;
+  nextRunAt: string | null;
+  _count: {
+    skills: number;
+    projects: number;
+    experiences: number;
+    sources: number;
+    resumes: number;
+  };
+}
+
+export interface ResumeRow {
+  id: string;
+  name: string;
+  kind: 'PDF' | 'MARKDOWN' | 'TEXT';
+  filename: string | null;
+  status: 'PENDING' | 'EMBEDDING' | 'READY' | 'FAILED';
+  error: string | null;
+  active: boolean;
+  chunkCount: number;
+  createdAt: string;
+  _count?: { chunks: number };
 }
 
 export type VacancyStatus =
@@ -62,6 +100,8 @@ export interface VacancyDetail {
 export interface MatchResult {
   id: string;
   score: number;
+  analysisScore: number | null;
+  semanticScore: number | null;
   verdict: string;
   reasons: string[];
   gaps: string[];

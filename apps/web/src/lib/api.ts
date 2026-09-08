@@ -12,8 +12,10 @@ export function clearToken() {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const isForm =
+    typeof FormData !== 'undefined' && init.body instanceof FormData;
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...(isForm ? {} : { 'Content-Type': 'application/json' }),
     ...(init.headers as Record<string, string> | undefined),
   };
   const token = getToken();
@@ -41,6 +43,8 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  upload: <T>(path: string, form: FormData) =>
+    request<T>(path, { method: 'POST', body: form }),
 };
 
 export async function login(email: string, password: string): Promise<void> {

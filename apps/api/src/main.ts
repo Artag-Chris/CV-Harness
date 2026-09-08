@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { env } from './config/env';
 import { JsonLogger } from './common/json-logger.service';
@@ -9,10 +10,29 @@ async function bootstrap(): Promise<void> {
   app.setGlobalPrefix('api');
   app.enableCors();
 
+  // Contrato OpenAPI: UI en /api/docs y JSON en /api/docs-json.
+  const config = new DocumentBuilder()
+    .setTitle('CV Harness API')
+    .setDescription(
+      'Vacantes → match semántico (pgvector) + IA por perfil → hoja de vida. Contrato versionado.',
+    )
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api/docs', app, document, {
+    jsonDocumentUrl: 'api/docs-json',
+  });
+
   await app.listen(env.PORT);
   const logger = app.get(JsonLogger);
   logger.log(
-    { msg: 'cv-harness api escuchando', port: env.PORT, llmMode: env.llmMode },
+    {
+      msg: 'cv-harness api escuchando',
+      port: env.PORT,
+      llmMode: env.llmMode,
+      docs: `/api/docs`,
+    },
     'Bootstrap',
   );
 }

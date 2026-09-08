@@ -145,6 +145,13 @@ export default function VacancyDetailPage() {
           {current.match && (
             <>
               <Section title={`Match ${current.match.score}/100 · ${current.match.verdict}`}>
+                {(current.match.analysisScore !== null || current.match.semanticScore !== null) && (
+                  <p className="mb-2 text-xs text-zinc-500">
+                    Análisis IA {current.match.analysisScore ?? '—'} · Similitud CV{' '}
+                    {current.match.semanticScore ?? 'sin HV activa'} · Final{' '}
+                    {current.match.score}/100
+                  </p>
+                )}
                 <ListBlock title="Razones" items={current.match.reasons} />
                 <div className="mt-3">
                   <ListBlock title="Brechas" items={current.match.gaps} />

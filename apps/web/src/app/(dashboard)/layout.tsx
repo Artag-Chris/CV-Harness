@@ -9,6 +9,7 @@ import { usePoll } from '@/lib/usePoll';
 const NAV = [
   { href: '/vacantes', label: 'Vacantes' },
   { href: '/notificaciones', label: 'Notificaciones' },
+  { href: '/perfiles', label: 'Perfiles & CV' },
   { href: '/fuentes', label: 'Fuentes' },
 ];
 

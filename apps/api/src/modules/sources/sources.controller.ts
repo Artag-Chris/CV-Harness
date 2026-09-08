@@ -6,7 +6,9 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
+import { CreateSourceDto } from '../../common/api-dto';
 import { DispatchService } from '../scheduler/dispatch.service';
 import { SourcesService } from './sources.service';
 
@@ -18,8 +20,13 @@ export class SourcesController {
   ) {}
 
   @Get()
-  list() {
-    return this.sources.list();
+  list(@Query('profileId') profileId?: string) {
+    return profileId ? this.sources.listByProfile(profileId) : this.sources.list();
+  }
+
+  @Get('templates')
+  templates() {
+    return this.sources.templates();
   }
 
   @Get(':id')
@@ -28,7 +35,7 @@ export class SourcesController {
   }
 
   @Post()
-  create(@Body() body: unknown) {
+  create(@Body() body: CreateSourceDto) {
     return this.sources.create(body);
   }
 

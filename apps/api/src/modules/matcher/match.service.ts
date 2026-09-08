@@ -13,6 +13,11 @@ import {
   MatchOutcomeSchema,
 } from '../pipeline/pipeline.types';
 import { buildProfileSnapshot } from '../profiles/profile-snapshot';
+import { ResumesService } from '../resumes/resumes.service';
+
+// Peso del análisis con IA vs la similitud semántica en el score final.
+const WEIGHT_AI = 0.65;
+const WEIGHT_SEMANTIC = 0.35;
 
 const SYSTEM_PROMPT = `Eres un reclutador técnico senior experto en ATS. Comparas el perfil canónico de un candidato con una vacante y decides qué tan buen match es.
 
@@ -42,6 +47,7 @@ export class MatchService {
     private readonly prisma: PrismaService,
     @Inject(LLM_PROVIDER) private readonly llm: LlmProvider,
     @InjectQueue(queueName(QUEUES.RESUME)) private readonly resumeQueue: Queue,
+    private readonly resumes: ResumesService,
     private readonly logger: JsonLogger,
   ) {}
 
@@ -63,12 +69,29 @@ export class MatchService {
       vacancy.profileId,
     );
 
-    const ai = await this.llm.json(SYSTEM_PROMPT, this.buildUserPrompt(vacancy, profileSnapshot));
+    // ── 1) Similitud semántica contra la HV activa del perfil (pgvector) ──
+    const semantic = await this.resumes.searchActiveResume(
+      vacancy.profileId,
+      this.buildSemanticQuery(vacancy),
+      5,
+    );
+    const semanticScore = semantic.bestScore;
+
+    // ── 2) Análisis con IA (o determinístico) ──
+    const ai = await this.llm.json(
+      SYSTEM_PROMPT,
+      this.buildUserPrompt(vacancy, profileSnapshot, semantic),
+    );
     const outcome = ai
       ? MatchOutcomeSchema.parse(ai)
       : await this.deterministicOutcome(vacancy);
 
-    const score = Math.round(outcome.score);
+    const analysisScore = Math.round(outcome.score);
+    // ── 3) Score final híbrido ──
+    const score =
+      semanticScore !== null
+        ? Math.round(WEIGHT_AI * analysisScore + WEIGHT_SEMANTIC * semanticScore)
+        : analysisScore;
     const verdict =
       score >= 80 ? 'GOOD_MATCH' : score >= 60 ? 'POSSIBLE' : 'WEAK';
 
@@ -83,6 +106,8 @@ export class MatchService {
       where: { vacancyId: vacancy.id },
       update: {
         score,
+        analysisScore,
+        semanticScore,
         verdict,
         reasons: outcome.reasons as Prisma.InputJsonValue,
         gaps: outcome.gaps as Prisma.InputJsonValue,
@@ -92,6 +117,8 @@ export class MatchService {
       create: {
         vacancyId: vacancy.id,
         score,
+        analysisScore,
+        semanticScore,
         verdict,
         reasons: outcome.reasons as Prisma.InputJsonValue,
         gaps: outcome.gaps as Prisma.InputJsonValue,
@@ -136,6 +163,24 @@ export class MatchService {
     }
   }
 
+  /** Texto de la vacante usado como query de búsqueda semántica sobre el CV. */
+  private buildSemanticQuery(vacancy: {
+    title: string;
+    descriptionRaw: string;
+    enrichment: Prisma.JsonValue | null;
+  }): string {
+    const enr = (vacancy.enrichment ?? {}) as Record<string, unknown>;
+    return [
+      vacancy.title,
+      Array.isArray(enr.summary) ? '' : String(enr.summary ?? ''),
+      Array.isArray(enr.keyRequirements) ? (enr.keyRequirements as string[]).join('. ') : '',
+      Array.isArray(enr.skills) ? (enr.skills as string[]).join(', ') : '',
+      vacancy.descriptionRaw.slice(0, 1500),
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
   private buildUserPrompt(
     vacancy: {
       id: string;
@@ -146,6 +191,7 @@ export class MatchService {
       enrichment: Prisma.JsonValue | null;
     },
     profileSnapshot: string,
+    semantic: { hits: { content: string; similarity: number }[]; bestScore: number | null },
   ): string {
     const enr = (vacancy.enrichment ?? {}) as Record<string, unknown>;
     const structured = {
@@ -160,7 +206,15 @@ export class MatchService {
       deseable: enr.niceToHave ?? [],
       skills: enr.skills ?? [],
     };
-    return `VACANTE (estructurada):\n${JSON.stringify(structured, null, 2)}\n\nTEXTO ORIGINAL (contexto):\n${vacancy.descriptionRaw.slice(0, 6000)}\n\n${profileSnapshot}`;
+    // Fragmentos de la HV activa que mejor matchean la vacante (contexto extra).
+    const resumeContext =
+      semantic.bestScore !== null && semantic.hits.length > 0
+        ? `\n\nHOJA DE VIDA ACTIVA (fragmentos más relevantes, similitud ${semantic.bestScore}/100):\n${semantic.hits
+            .slice(0, 3)
+            .map((h) => `- ${h.content.slice(0, 700)}`)
+            .join('\n')}`
+        : '';
+    return `VACANTE (estructurada):\n${JSON.stringify(structured, null, 2)}\n\nTEXTO ORIGINAL (contexto):\n${vacancy.descriptionRaw.slice(0, 6000)}\n\n${profileSnapshot}${resumeContext}`;
   }
 
   /** Respaldo determinístico (sin red): solape de skills con el perfil. */

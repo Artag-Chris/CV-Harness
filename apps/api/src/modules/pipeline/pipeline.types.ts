@@ -19,6 +19,7 @@ export const ScraperItemSchema = z.object({
 });
 
 export const ScraperResultPayloadSchema = z.object({
+  schemaVersion: z.string().optional().default('1'),
   requestId: z.string().min(1),
   sourceId: z.string().optional().nullable(),
   scrapedAt: z.string().optional().nullable(),

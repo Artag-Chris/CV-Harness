@@ -12,6 +12,7 @@ export const QUEUES = {
   MATCH: 'match',
   RESUME: 'resume',
   NOTIFICATION: 'notification',
+  RESUME_INDEX: 'resume-index',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];

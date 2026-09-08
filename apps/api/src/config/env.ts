@@ -16,6 +16,9 @@ const envSchema = z.object({
   QUEUE_PREFIX: z.string().default('cvharness'),
   GROQ_API_KEY: z.string().default(''),
   GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
+  // Embeddings estilo atiende (OpenAI text-embedding-3-small → 1536 dims).
+  OPENAI_API_KEY: z.string().default(''),
+  EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
   JWT_SECRET: z.string().default('dev-secret-change-me'),
   JWT_EXPIRES_IN: z.string().default('1d'),
   ADMIN_EMAIL: z.string().email().default('admin@cvharness.local'),
@@ -24,11 +27,13 @@ const envSchema = z.object({
   MATCH_MIN_SCORE: z.coerce.number().default(65),
   FIXTURE_BASE_URL: z.string().default('http://localhost:8090'),
   LLM_PROVIDER: z.enum(['auto', 'groq', 'mock']).default('auto'),
+  EMBEDDING_PROVIDER: z.enum(['auto', 'openai', 'mock']).default('auto'),
 });
 
 export type RawEnv = z.infer<typeof envSchema>;
 export type LlmMode = 'groq' | 'mock';
-export type Env = RawEnv & { llmMode: LlmMode };
+export type EmbedMode = 'openai' | 'mock';
+export type Env = RawEnv & { llmMode: LlmMode; embedMode: EmbedMode };
 
 /**
  * REDIS_URL se puede setear directo, o derivarse de REDIS_HOST/REDIS_PORT/
@@ -54,7 +59,12 @@ export function parseEnv(input: NodeJS.ProcessEnv = process.env): Env {
     (parsed.LLM_PROVIDER === 'auto' && parsed.GROQ_API_KEY.length === 0)
       ? 'mock'
       : 'groq';
-  return { ...parsed, llmMode };
+  const embedMode: EmbedMode =
+    parsed.EMBEDDING_PROVIDER === 'mock' ||
+    (parsed.EMBEDDING_PROVIDER === 'auto' && parsed.OPENAI_API_KEY.length === 0)
+      ? 'mock'
+      : 'openai';
+  return { ...parsed, llmMode, embedMode };
 }
 
 /** Instancia global parseada una vez (dotenv/config carga apps/api/.env). */

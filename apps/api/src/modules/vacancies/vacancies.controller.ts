@@ -9,6 +9,7 @@ import {
   Query,
 } from '@nestjs/common';
 import { VacancyStatus } from '@prisma/client';
+import { VacancyStatusDto } from '../../common/api-dto';
 import { VacanciesService } from './vacancies.service';
 
 const VALID_STATUS = new Set(['APPLIED', 'IGNORED']);
@@ -40,14 +41,11 @@ export class VacanciesController {
   }
 
   @Post(':id/status')
-  async setStatus(@Param('id') id: string, @Body() body: { status?: string }) {
-    if (!body.status || !VALID_STATUS.has(body.status)) {
+  async setStatus(@Param('id') id: string, @Body() body: VacancyStatusDto) {
+    if (!VALID_STATUS.has(body.status)) {
       throw new BadRequestException('status debe ser APPLIED o IGNORED');
     }
-    const updated = await this.vacancies.setStatus(
-      id,
-      body.status as 'APPLIED' | 'IGNORED',
-    );
+    const updated = await this.vacancies.setStatus(id, body.status, body.profileId);
     return { ok: true, vacancy: updated };
   }
 }

@@ -26,7 +26,7 @@ services:
   # PostgreSQL 16 (exclusivo cv-harness)
   # ─────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: cvharness-postgres
     restart: unless-stopped
     environment:
@@ -116,23 +116,10 @@ services:
       - microservices-network
 
   # ─────────────────────────────────────────
-  # Dashboard web (Next.js)
+  # NOTA: el frontend de cv-harness vive como pestaña "CV Harness" en el
+  # dashboard de atiende (proyecto dashboard/, puerto 3001 del host).
+  # Por eso NO se levanta aquí apps/web: evita chocar con el 3001.
   # ─────────────────────────────────────────
-  web:
-    build:
-      context: ./apps/web
-      args:
-        API_PROXY_TARGET: http://cvharness-api:3100/api
-    container_name: cvharness-web
-    restart: unless-stopped
-    environment:
-      API_PROXY_TARGET: http://cvharness-api:3100/api
-    ports:
-      - "${WEB_PORT:-3001}:3001"
-    depends_on:
-      - api
-    networks:
-      - microservices-network
 
   # ─────────────────────────────────────────
   # Fixture E2E (página HTML local con vacantes fake)
