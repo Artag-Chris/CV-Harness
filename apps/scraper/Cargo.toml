@@ -1,0 +1,21 @@
+[package]
+name = "cv-harness-scraper"
+version = "0.1.0"
+edition = "2021"
+description = "Worker Rust del CV Harness: consume recetas de scraping desde Redis Streams y publica resultados"
+
+[dependencies]
+anyhow = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+redis = { version = "0.27", features = ["tokio-comp"] }
+scraper = "0.20"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+
+[profile.release]
+lto = true
+strip = true

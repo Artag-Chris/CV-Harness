@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+target/
+.next/
+dist/
+
+# Env
+.env
+.env.local
+*.local
+
+# Logs
+*.log
+logs/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Prisma
+apps/api/prisma/*.db

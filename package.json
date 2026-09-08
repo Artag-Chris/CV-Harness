@@ -1,0 +1,15 @@
+{
+  "name": "cv-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Harness event-driven: vacantes → match IA → hoja de vida personalizada (NestJS + scraper Rust + dashboard web)",
+  "scripts": {
+    "docker:up": "docker compose up -d",
+    "docker:up:local": "docker compose --profile local-redis --profile fixture up -d --build",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:ps": "docker compose ps",
+    "docker:rebuild": "docker compose up -d --build",
+    "seed": "docker compose exec api npx ts-node prisma/seed.ts"
+  }
+}

@@ -1,0 +1,157 @@
+# cv-harness - Docker Compose
+#
+# Mismo patrón que atiende:
+#   - Postgres 16 dedicado (cvharness-postgres) sobre microservices-network.
+#   - Redis COMPARTIDA vía microservices-network (hostname "redis:6379").
+#     Debe estar corriendo antes de iniciar (en atiende es la misma).
+#   - API en target development con hot-reload (src montado).
+#   - Worker Rust (scraping) + dashboard web como contenedores.
+#
+# Uso en el server (Redis compartida ya corriendo):
+#   docker compose up -d
+#   docker compose down
+#   docker compose logs -f
+#
+# Uso en una máquina sin esa Redis (levanta una local "redis" en la misma red):
+#   docker compose --profile local-redis up -d
+#
+# Con fixture local para E2E (página HTML con vacantes fake):
+#   docker compose --profile local-redis --profile fixture up -d
+#
+# ⚠️ Ojo: el profile local-redis crea un contenedor llamado "redis". Si tu
+#    server ya tiene la Redis compartida de atiende, NO uses ese profile.
+
+services:
+  # ─────────────────────────────────────────
+  # PostgreSQL 16 (exclusivo cv-harness)
+  # ─────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: cvharness-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cvharness
+      POSTGRES_PASSWORD: cvharness
+      POSTGRES_DB: cvharness
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - cvharness_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cvharness -d cvharness"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - microservices-network
+
+  # ─────────────────────────────────────────
+  # Redis compartida (SOLO para desarrollo/verificación local).
+  # En el server se reutiliza la de atiende: no correr este servicio.
+  # ─────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    profiles: ["local-redis"]
+    ports:
+      - "${REDIS_HOST_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - microservices-network
+
+  # ─────────────────────────────────────────
+  # API / harness (NestJS, hot-reload como atiende)
+  # ─────────────────────────────────────────
+  api:
+    build:
+      context: ./apps/api
+      target: development
+    container_name: cvharness-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: ${API_PORT:-3100}
+      DATABASE_URL: postgresql://cvharness:cvharness@cvharness-postgres:5432/cvharness?schema=public
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      QUEUE_PREFIX: ${QUEUE_PREFIX:-cvharness}
+      # Para que el seed cree la fuente fixture apuntando al contenedor de la
+      # red (cvharness-fixture) en vez de localhost, que adentro es el propio api.
+      FIXTURE_BASE_URL: ${FIXTURE_BASE_URL:-http://cvharness-fixture}
+      # FIXTURE_ENABLED=false (server) evita sembrar la fuente E2E habilitada.
+      FIXTURE_ENABLED: ${FIXTURE_ENABLED:-true}
+    volumes:
+      - ./apps/api/src:/app/src
+      - ./apps/api/prisma:/app/prisma
+      - ./apps/api/test:/app/test
+    ports:
+      - "${API_PORT:-3100}:3100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microservices-network
+
+  # ─────────────────────────────────────────
+  # Worker de scraping (Rust) — consume scraper:requests
+  # ─────────────────────────────────────────
+  scraper:
+    build:
+      context: ./apps/scraper
+    container_name: cvharness-scraper
+    restart: unless-stopped
+    environment:
+      REDIS_URL: ${SCRAPER_REDIS_URL:-redis://redis:6379}
+      RUST_LOG: ${RUST_LOG:-info}
+    networks:
+      - microservices-network
+
+  # ─────────────────────────────────────────
+  # Dashboard web (Next.js)
+  # ─────────────────────────────────────────
+  web:
+    build:
+      context: ./apps/web
+      args:
+        API_PROXY_TARGET: http://cvharness-api:3100/api
+    container_name: cvharness-web
+    restart: unless-stopped
+    environment:
+      API_PROXY_TARGET: http://cvharness-api:3100/api
+    ports:
+      - "${WEB_PORT:-3001}:3001"
+    depends_on:
+      - api
+    networks:
+      - microservices-network
+
+  # ─────────────────────────────────────────
+  # Fixture E2E (página HTML local con vacantes fake)
+  # ─────────────────────────────────────────
+  jobs-fixture:
+    image: nginx:alpine
+    container_name: cvharness-fixture
+    profiles: ["fixture"]
+    volumes:
+      - ./fixtures/www:/usr/share/nginx/html:ro
+    ports:
+      - "${FIXTURE_PORT:-8090}:80"
+    networks:
+      - microservices-network
+
+volumes:
+  cvharness_pgdata:
+    name: cvharness_pgdata
+
+networks:
+  microservices-network:
+    external: true

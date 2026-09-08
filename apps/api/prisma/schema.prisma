@@ -1,0 +1,277 @@
+// CV Harness — esquema de datos
+// postgres:16 · Prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Perfil canónico (1..N perfiles). Los MD actuales se consolidan en el seed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Profile {
+  id        String   @id @default(cuid())
+  name      String
+  headline  String[]
+  summary   String
+  email     String?
+  phone     String?
+  location  String?
+  languages Json     @default("[]")
+  softSkills Json    @default("[]")
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  experiences Experience[]
+  education   Education[]
+  projects    Project[]
+  skills      ProfileSkill[]
+  links       ContactLink[]
+  sources     Source[]
+  vacancies   Vacancy[]
+  resumeDrafts ResumeDraft[]
+
+  @@index([isPrimary])
+}
+
+model Experience {
+  id          String   @id @default(cuid())
+  profileId   String
+  role        String
+  company     String
+  periodStart String
+  periodEnd   String?
+  isCurrent   Boolean  @default(false)
+  bullets     Json     @default("[]")
+  sortOrder   Int      @default(0)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
+
+model Education {
+  id          String @id @default(cuid())
+  profileId   String
+  institution String
+  degree      String
+  periodStart String
+  periodEnd   String?
+  sortOrder   Int    @default(0)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
+
+model Project {
+  id            String @id @default(cuid())
+  profileId     String
+  name          String
+  summary       String
+  stack         Json   @default("[]")
+  repositoryUrl String?
+  websiteUrl    String?
+  visibility    String @default("public") // public | proprietary
+  highlights    Json   @default("[]")
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
+
+model Skill {
+  id            String          @id @default(cuid())
+  name          String          @unique
+  profileSkills ProfileSkill[]
+}
+
+model ProfileSkill {
+  id         String @id @default(cuid())
+  profileId  String
+  skillId    String
+  category   String // AI & LLMs, Backend, Frontend, Databases, Infra & Cloud...
+  rating     Int // 1-5 (canónico, consolidado de los MDs)
+  provenance String // Christian_Henao_AI_Engineer_CV.md | Christian_Henao_Skills_Formato.md | ... | curated
+  knowledge  String?
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  skill   Skill   @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, skillId])
+  @@index([category])
+}
+
+model ContactLink {
+  id        String  @id @default(cuid())
+  profileId String
+  type      String // email | phone | github | linkedin | website | ...
+  url       String
+  isPrimary Boolean @default(false)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Fuentes de vacantes (lo que el cron recorre) + recetas de scraping
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Source {
+  id        String   @id @default(cuid())
+  name      String
+  kind      String   @default("HTML_RECIPE")
+  baseUrl   String
+  listUrl   String
+  // Receta de selectores CSS y extracción (JSONB): { item, title, company,
+  // location, description, applyUrl, postedAt, nextPage }
+  selectors Json
+  // Limites/politeness: { maxPages, delayMs, timeoutMs, userAgent, respectRobots }
+  limits    Json     @default("{}")
+  enabled   Boolean  @default(true)
+  intervalMinutes Int @default(1440) // cadencia propia de la fuente
+  lastRunAt DateTime?
+  nextRunAt DateTime  @default(now())
+  profileId String? // perfil objetivo (si es null, aplica a todos)
+
+  profile Profile?  @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  runs     ScrapeRun[]
+  vacancies Vacancy[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled, nextRunAt])
+}
+
+model ScrapeRun {
+  id          String    @id @default(cuid())
+  sourceId    String
+  requestId   String    @unique
+  status      String    @default("RUNNING") // RUNNING | OK | FAILED
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  itemsFound  Int       @default(0)
+  itemsNew    Int       @default(0)
+  error       String?
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vacantes y pipeline de enriquecimiento
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum VacancyStatus {
+  RAW
+  NORMALIZED
+  MATCHED
+  RESUME_READY
+  APPLIED
+  IGNORED
+}
+
+model Vacancy {
+  id             String        @id @default(cuid())
+  sourceId       String
+  profileId      String?
+  fingerprint    String        @unique // sha256(url canónica)
+  externalId     String?
+  url            String
+  title          String
+  company        String?
+  location       String?
+  salary         String?
+  modality       String?
+  postedAt       DateTime?
+  descriptionRaw String        @db.Text
+  // Enriquecimiento LLM (JSONB): { summary, keyRequirements[], niceToHave[],
+  // skills[], seniority }
+  enrichment     Json?
+  raw            Json          @default("{}") // auditoría del item scrapeado
+  status         VacancyStatus @default(RAW)
+  matchScore     Int?
+  appliedAt      DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  source   Source       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  profile  Profile?     @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  match    MatchResult?
+  resume   ResumeDraft?
+
+  @@index([status])
+  @@index([sourceId])
+  @@index([profileId])
+}
+
+model MatchResult {
+  id        String    @id @default(cuid())
+  vacancyId String    @unique
+  score     Int
+  verdict   String // GOOD_MATCH | POSSIBLE | WEAK
+  reasons   Json      @default("[]")
+  gaps      Json      @default("[]")
+  // Fórmula de aplicación (JSONB): { highlights[], keywords[], angle,
+  // suggestedChannel }
+  applicationStrategy Json
+  coverLetterDraft     String?  @db.Text
+  createdAt DateTime   @default(now())
+
+  vacancy Vacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+}
+
+model ResumeDraft {
+  id        String   @id @default(cuid())
+  vacancyId String   @unique
+  profileId String
+  // Secciones redactadas (JSONB): [{ heading, body }] + meta
+  content   Json
+  format    String   @default("MARKDOWN")
+  status    String   @default("DRAFT") // DRAFT | FINAL
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vacancy Vacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notificaciones (bandeja del dashboard; adapters email/telegram en fase 2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String    @id @default(cuid())
+  type      String // MATCH_READY | RESUME_READY | SCRAPE_ERROR | SOURCE_ERROR | INFO
+  title     String
+  body      String    @db.Text
+  payload   Json      @default("{}")
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([readAt])
+  @@index([createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auth (un solo admin para el MVP)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
