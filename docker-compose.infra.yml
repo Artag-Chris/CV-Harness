@@ -42,6 +42,21 @@ services:
     networks:
       - microservices-network
 
+  # Override LOCAL del servicio api (se usa con -f docker-compose.infra.yml):
+  # apunta la API a la postgres/redis locales en vez de las del server.
+  api:
+    environment:
+      DATABASE_URL: postgresql://cvharness:cvharness@cvharness-postgres:5432/cvharness?schema=public
+      DATABASE_HOST: cvharness-postgres
+      POSTGRES_USER: cvharness
+      POSTGRES_PASSWORD: cvharness
+      POSTGRES_DB: cvharness
+      FIXTURE_ENABLED: "true"
+      FIXTURE_BASE_URL: http://cvharness-fixture
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   cvharness_pgdata:
     name: cvharness_pgdata
