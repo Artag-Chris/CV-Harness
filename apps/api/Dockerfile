@@ -13,8 +13,8 @@ RUN npm install
 COPY . .
 RUN npx prisma generate
 EXPOSE 3100
-# En cada boot: migraciones pendientes + seed idempotente + hot-reload.
-CMD ["sh", "-c", "npx prisma migrate deploy && npx ts-node prisma/seed.ts && npm run start:dev"]
+# En cada boot: asegura la DB + migraciones + seed idempotente + hot-reload.
+CMD ["sh", "-c", "npx ts-node prisma/ensure-database.ts && npx prisma migrate deploy && npx ts-node prisma/seed.ts && npm run start:dev"]
 
 FROM base AS builder
 ENV NODE_ENV=development
