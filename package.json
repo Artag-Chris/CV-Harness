@@ -5,11 +5,14 @@
   "description": "Harness event-driven: vacantes → match IA → hoja de vida personalizada (NestJS + scraper Rust + dashboard web)",
   "scripts": {
     "docker:up": "docker compose up -d",
-    "docker:up:local": "docker compose --profile local-redis --profile fixture up -d --build",
     "docker:down": "docker compose down",
     "docker:logs": "docker compose logs -f",
     "docker:ps": "docker compose ps",
     "docker:rebuild": "docker compose up -d --build",
+    "docker:infra:up": "docker compose -f docker-compose.infra.yml up -d",
+    "docker:infra:down": "docker compose -f docker-compose.infra.yml down",
+    "docker:up:local": "docker compose -f docker-compose.yml -f docker-compose.infra.yml --profile fixture up -d --build",
+    "docker:down:local": "docker compose -f docker-compose.yml -f docker-compose.infra.yml down",
     "seed": "docker compose exec api npx ts-node prisma/seed.ts"
   }
 }

@@ -1,73 +1,25 @@
-# cv-harness - Docker Compose
+# cv-harness - Docker Compose (producción/server)
 #
-# Mismo patrón que atiende:
-#   - Postgres 16 + pgvector dedicado (cvharness-postgres) sobre
-#     microservices-network (atiende usa su propio postgres; acá uno propio).
-#   - Redis COMPARTIDA vía microservices-network (hostname "redis:6379").
-#     Debe estar corriendo antes de iniciar (en atiende es la misma).
-#   - API en target development con hot-reload (src montado).
-#   - Worker Rust (scraping) como contenedor. El frontend vive en el proyecto
-#     dashboard/ (pestaña CV Harness), no se levanta acá.
+# SOLO lo necesario para correr el proyecto. NO crea base de datos ni redis:
+# en el server ya corren (misma red microservices-network que atiende):
+#   - Redis compartida  → hostname "redis:6379"
+#   - PostgreSQL        → hostname configurable (default "cvharness-postgres";
+#                         en el server de atiende suele ser "atiende-postgres")
+#                          con un database "cvharness" + extensión pgvector.
 #
-# Uso en el server (Redis compartida ya corriendo):
-#   docker compose up -d
-#   docker compose down
+# Uso en el server:
+#   docker compose up -d          # levanta api + scraper
 #   docker compose logs -f
+#   docker compose down
 #
-# Uso en una máquina sin esa Redis (levanta una local "redis" en la misma red):
-#   docker compose --profile local-redis up -d
-#
-# Con fixture local para E2E (página HTML con vacantes fake):
-#   docker compose --profile local-redis --profile fixture up -d
-#
-# ⚠️ Ojo: el profile local-redis crea un contenedor llamado "redis". Si tu
-#    server ya tiene la Redis compartida de atiende, NO uses ese profile.
+# En dev local (necesita postgres+redis): 
+#   docker compose -f docker-compose.yml -f docker-compose.infra.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.infra.yml \
+#     --profile fixture up -d     # + fixture E2E
 
 services:
   # ─────────────────────────────────────────
-  # PostgreSQL 16 (exclusivo cv-harness)
-  # ─────────────────────────────────────────
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: cvharness-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: cvharness
-      POSTGRES_PASSWORD: cvharness
-      POSTGRES_DB: cvharness
-    ports:
-      - "${POSTGRES_PORT:-5434}:5432"
-    volumes:
-      - cvharness_pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cvharness -d cvharness"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    networks:
-      - microservices-network
-
-  # ─────────────────────────────────────────
-  # Redis compartida (SOLO para desarrollo/verificación local).
-  # En el server se reutiliza la de atiende: no correr este servicio.
-  # ─────────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    restart: unless-stopped
-    profiles: ["local-redis"]
-    ports:
-      - "${REDIS_HOST_PORT:-6380}:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-    networks:
-      - microservices-network
-
-  # ─────────────────────────────────────────
-  # API / harness (NestJS, hot-reload como atiende)
+  # API / harness (NestJS)
   # ─────────────────────────────────────────
   api:
     build:
@@ -80,27 +32,22 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: ${API_PORT:-3100}
-      DATABASE_URL: postgresql://cvharness:cvharness@cvharness-postgres:5432/cvharness?schema=public
+      # Postgres EXTERNO (ya corriendo). Configura DATABASE_HOST según tu server.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cvharness}:${POSTGRES_PASSWORD:-cvharness}@${DATABASE_HOST:-cvharness-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB:-cvharness}?schema=public
+      # Redis compartida (ya corriendo como "redis" en la red).
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       QUEUE_PREFIX: ${QUEUE_PREFIX:-cvharness}
-      # Para que el seed cree la fuente fixture apuntando al contenedor de la
-      # red (cvharness-fixture) en vez de localhost, que adentro es el propio api.
+      # La fuente E2E solo se siembra con FIXTURE_ENABLED=true (dev local).
       FIXTURE_BASE_URL: ${FIXTURE_BASE_URL:-http://cvharness-fixture}
-      # FIXTURE_ENABLED=false por defecto (server): la fuente E2E no se siembra.
-      # En dev local el .env la pone en true junto al profile "fixture".
       FIXTURE_ENABLED: ${FIXTURE_ENABLED:-false}
     volumes:
       - ./apps/api/src:/app/src
       - ./apps/api/prisma:/app/prisma
-      - ./apps/api/test:/app/test
     ports:
       - "${API_PORT:-3100}:3100"
-    depends_on:
-      postgres:
-        condition: service_healthy
     networks:
       - microservices-network
 
@@ -119,13 +66,8 @@ services:
       - microservices-network
 
   # ─────────────────────────────────────────
-  # NOTA: el frontend de cv-harness vive como pestaña "CV Harness" en el
-  # dashboard de atiende (proyecto dashboard/, puerto 3001 del host).
-  # Por eso NO se levanta aquí apps/web: evita chocar con el 3001.
-  # ─────────────────────────────────────────
-
-  # ─────────────────────────────────────────
-  # Fixture E2E (página HTML local con vacantes fake)
+  # Fixture E2E (SOLO dev, profile "fixture"): página HTML con vacantes fake.
+  # No se levanta con `docker compose up -d`.
   # ─────────────────────────────────────────
   jobs-fixture:
     image: nginx:alpine
@@ -137,10 +79,6 @@ services:
       - "${FIXTURE_PORT:-8090}:80"
     networks:
       - microservices-network
-
-volumes:
-  cvharness_pgdata:
-    name: cvharness_pgdata
 
 networks:
   microservices-network:

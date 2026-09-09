@@ -1,0 +1,51 @@
+# Infraestructura LOCAL de cv-harness (postgres pgvector + redis compartida).
+# En el server NO se usa: ahí ya corren la Redis y el Postgres.
+#
+# Uso:
+#   docker compose -f docker-compose.yml -f docker-compose.infra.yml up -d
+#   docker compose -f docker-compose.infra.yml down        # apaga solo infra
+#
+# Nombres de contenedor iguales a los históricos para reutilizar los volúmenes.
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: cvharness-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cvharness
+      POSTGRES_PASSWORD: cvharness
+      POSTGRES_DB: cvharness
+    ports:
+      - "${POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - cvharness_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cvharness -d cvharness"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - microservices-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_HOST_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - microservices-network
+
+volumes:
+  cvharness_pgdata:
+    name: cvharness_pgdata
+
+networks:
+  microservices-network:
+    external: true
