@@ -12,6 +12,7 @@ export class MatchWorker extends WorkerHost {
 
   async process(job: Job): Promise<void> {
     const data = VacancyJobSchema.parse(job.data);
-    await this.matcher.handle(data.vacancyId);
+    if (!data.profileId) return; // jobs viejos sin perfil: los re-emite el normalizer
+    await this.matcher.handle(data.vacancyId, data.profileId);
   }
 }

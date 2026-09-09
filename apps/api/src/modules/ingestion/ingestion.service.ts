@@ -66,7 +66,9 @@ export class IngestionService {
       await this.finalizeRun(run.id, 'FAILED', 0, 0, 'fuente eliminada durante la corrida');
       return { itemsNew: 0, itemsFound: 0 };
     }
-    const profileId = await this.resolveProfileId(source.profileId ?? null);
+    // El perfil ya no se decide en ingestión: el fan-out N:M ocurre en
+    // normalización según los perfiles que vigilan la fuente.
+    const profileId: string | null = null;
 
     let itemsNew = 0;
     let itemsSkipped = 0;

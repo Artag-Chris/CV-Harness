@@ -1,6 +1,6 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Inject, Injectable } from '@nestjs/common';
-import { Prisma, VacancyStatus } from '@prisma/client';
+import { Prisma, VacancyProfileStatus, VacancyStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { JsonLogger } from '../../common/json-logger.service';
 import { PrismaService } from '../../common/prisma.service';
@@ -12,15 +12,16 @@ import {
   ResumeContentSchema,
 } from '../pipeline/pipeline.types';
 import { buildProfileSnapshot } from '../profiles/profile-snapshot';
+import { recomputeVacancyAggregate } from '../vacancies/aggregate';
 import { renderResumeMarkdown } from './resume-markdown';
 
 const SYSTEM_PROMPT = `Eres un redactor profesional de hojas de vida (ATS-friendly). Reescribes el perfil de un candidato para una vacante específica maximizando el match con palabras clave, SIN inventar experiencia, logros, tecnologías ni datos.
 
 Devuelve ÚNICAMENTE JSON con esta forma exacta:
 {
-  "headline": "título de una línea orientado a la vacante (ej. 'AI Engineer & Backend Specialist')",
+  "headline": "título de una línea orientado a la vacante",
   "summary": "resumen de 3-4 líneas enfocado en lo que la vacante pide, usando solo hechos del perfil",
-  "skills": ["skill", ...] (20 máximo, ordenadas por relevancia para la vacante; usa los keywords del strategy cuando el perfil lo respalde),
+  "skills": ["skill", ...] (20 máximo, ordenadas por relevancia),
   "experience": [{"role": "...", "company": "...", "period": "2024 – Presente", "bullets": ["...", ...]}],
   "projects": [{"name": "...", "highlights": ["...", ...]}],
   "education": [{"institution": "...", "degree": "...", "period": "2023 – Presente"}],
@@ -28,11 +29,10 @@ Devuelve ÚNICAMENTE JSON con esta forma exacta:
   "keywords": ["palabra clave", ... máx 8]
 }
 
-Reglas: los bullets de experiencia y proyectos deben reescribirse para resaltar lo relevante a la vacante, pero conservando exactamente los hechos del perfil (roles, empresas, períodos, tecnologías). Prohibido agregar empresas, títulos, certificaciones o métricas que no estén en el perfil. Responde en español salvo que la vacante esté en otro idioma.`;
+Reglas: los bullets de experiencia y proyectos deben reescribirse para resaltar lo relevante a la vacante, pero conservando exactamente los hechos del perfil. Prohibido agregar empresas, títulos, certificaciones o métricas que no estén en el perfil. Responde en español salvo que la vacante esté en otro idioma.`;
 
 /**
- * Etapa "resume": genera un borrador de hoja de vida personalizado para la
- * vacante (JSON por secciones + markdown renderizado) y encola la notificación.
+ * Etapa "resume" N:M: genera el borrador de HV para (vacante, perfil).
  */
 @Injectable()
 export class ResumeService {
@@ -44,70 +44,71 @@ export class ResumeService {
     private readonly logger: JsonLogger,
   ) {}
 
-  async handle(vacancyId: string): Promise<void> {
-    const vacancy = await this.prisma.vacancy.findUnique({
-      where: { id: vacancyId },
-      include: {
-        match: true,
-        profile: true,
-        source: true,
-      },
+  async handle(vacancyId: string, profileId: string): Promise<void> {
+    const [vacancy, profile] = await Promise.all([
+      this.prisma.vacancy.findUnique({
+        where: { id: vacancyId },
+        include: { source: true },
+      }),
+      this.prisma.profile.findUnique({ where: { id: profileId } }),
+    ]);
+    if (!vacancy || !profile) return;
+
+    // Si este perfil ya se aplicó/ignoró, no regenerar.
+    const vp = await this.prisma.vacancyProfile.findUnique({
+      where: { vacancyId_profileId: { vacancyId, profileId } },
     });
-    if (!vacancy || !vacancy.match) return;
     if (
-      vacancy.status === VacancyStatus.APPLIED ||
-      vacancy.status === VacancyStatus.IGNORED
+      vp?.status === VacancyProfileStatus.APPLIED ||
+      vp?.status === VacancyProfileStatus.IGNORED
     ) {
       return;
     }
-    const match = vacancy.match;
 
-    const profileSnapshot = await buildProfileSnapshot(
-      this.prisma,
-      vacancy.profileId,
-    );
+    const match = await this.prisma.matchResult.findUnique({
+      where: { vacancyId_profileId: { vacancyId, profileId } },
+    });
+    if (!match) return;
+
+    const profileSnapshot = await buildProfileSnapshot(this.prisma, profileId);
     const ai = await this.llm.json(
       SYSTEM_PROMPT,
       this.buildUserPrompt(vacancy, match, profileSnapshot),
     );
     const content: ResumeContent = ai
       ? ResumeContentSchema.parse(ai)
-      : await this.deterministicContent(vacancy, match);
+      : await this.deterministicContent(vacancy, profileId, match);
 
-    const markdown = renderResumeMarkdown(content, vacancy.profile?.name ?? 'CV');
+    const markdown = renderResumeMarkdown(content, profile.name);
 
     const resume = await this.prisma.resumeDraft.upsert({
-      where: { vacancyId: vacancy.id },
+      where: { vacancyId_profileId: { vacancyId, profileId } },
       update: {
-        profileId: vacancy.profileId ?? vacancy.profile?.id ?? '',
         content: { ...content, markdown } as Prisma.InputJsonValue,
         version: { increment: 1 },
       },
       create: {
-        vacancyId: vacancy.id,
-        profileId: vacancy.profileId ?? vacancy.profile?.id ?? '',
+        vacancyId,
+        profileId,
         content: { ...content, markdown } as Prisma.InputJsonValue,
       },
     });
 
-    await this.prisma.vacancy.update({
-      where: { id: vacancy.id },
-      data: {
-        status:
-          vacancy.status === VacancyStatus.MATCHED ||
-          vacancy.status === VacancyStatus.NORMALIZED
-            ? VacancyStatus.RESUME_READY
-            : vacancy.status,
-      },
+    await this.prisma.vacancyProfile.upsert({
+      where: { vacancyId_profileId: { vacancyId, profileId } },
+      update: { status: VacancyProfileStatus.RESUME_READY },
+      create: { vacancyId, profileId, status: VacancyProfileStatus.RESUME_READY },
     });
+
+    await recomputeVacancyAggregate(this.prisma, vacancyId);
 
     await this.notificationQueue.add(
       'default',
       {
         type: 'RESUME_READY',
         title: `HV lista: ${vacancy.title}`,
-        body: `${vacancy.company ?? vacancy.source?.name ?? ''} · match ${match.score}/100 — revisa el borrador en el dashboard.`,
-        payload: { vacancyId: vacancy.id, resumeId: resume.id },
+        body: `${profile.name} · ${vacancy.company ?? vacancy.source?.name ?? ''} · match ${match.score}/100 — revisa el borrador en el dashboard.`,
+        payload: { vacancyId, resumeId: resume.id, profileId },
       },
       {
         attempts: 3,
@@ -119,8 +120,10 @@ export class ResumeService {
 
     this.logger.log(
       {
-        msg: 'borrador de HV generado',
-        vacancyId: vacancy.id,
+        msg: 'borrador de HV generado (por perfil)',
+        vacancyId,
+        profileId,
+        profileName: profile.name,
         resumeId: resume.id,
         provider: this.llm.name,
       },
@@ -129,11 +132,7 @@ export class ResumeService {
   }
 
   private buildUserPrompt(
-    vacancy: {
-      id: string;
-      title: string;
-      company: string | null;
-    },
+    vacancy: { title: string; company: string | null },
     match: {
       score: number;
       applicationStrategy: Prisma.JsonValue;
@@ -156,15 +155,12 @@ ${profileSnapshot}`;
 
   /** Respaldo determinístico: perfil canónico + keywords del strategy. */
   private async deterministicContent(
-    vacancy: {
-      profileId: string | null;
-      title: string;
-      company: string | null;
-    },
+    vacancy: { title: string; company: string | null },
+    profileId: string,
     match: { applicationStrategy: Prisma.JsonValue },
   ): Promise<ResumeContent> {
-    const profile = await this.prisma.profile.findFirst({
-      where: vacancy.profileId ? { id: vacancy.profileId } : { isPrimary: true },
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
       include: {
         experiences: { orderBy: { sortOrder: 'asc' } },
         education: { orderBy: { sortOrder: 'asc' } },
@@ -172,11 +168,10 @@ ${profileSnapshot}`;
         skills: { include: { skill: true }, orderBy: { rating: 'desc' } },
       },
     });
-    if (!profile) throw new Error('No hay perfil canónico sembrado');
+    if (!profile) throw new Error('No hay perfil sembrado');
 
     const strategy = (match.applicationStrategy ?? {}) as {
       keywords?: string[];
-      highlights?: string[];
     };
     const keywords = (strategy.keywords ?? []).map((k) => k.toLowerCase());
 
@@ -201,7 +196,7 @@ ${profileSnapshot}`;
       highlights: (p.highlights as string[] ?? []).slice(0, 3),
     }));
 
-    const summary = `AI Engineer y Team Leader con base en backend de sistemas distribuidos y aplicaciones con IA en producción. Enfocado en aportar su experiencia en arquitecturas event-driven, integraciones y desarrollo asistido por IA al equipo de ${vacancy.company ?? vacancy.title}.`;
+    const summary = `${profile.headline[0]} con base en backend distribuido, IA en producción y arquitecturas event-driven. Enfocado en aportar al equipo de ${vacancy.company ?? vacancy.title}.`;
 
     return {
       headline: `${profile.headline[0]} — postulando a ${vacancy.title}`,

@@ -82,22 +82,45 @@ export class NormalizeService {
       },
     });
 
-    await this.matchQueue.add(
-      'default',
-      { vacancyId: vacancy.id },
-      this.jobOpts(vacancy.id),
-    );
-
+    // Fan-out N:M: un job de match por cada perfil que vigila la fuente.
+    const profiles = await this.targetProfileIds(vacancy.sourceId);
+    for (const profileId of profiles) {
+      await this.prisma.vacancyProfile.upsert({
+        where: { vacancyId_profileId: { vacancyId: vacancy.id, profileId } },
+        update: {},
+        create: { vacancyId: vacancy.id, profileId },
+      });
+      await this.matchQueue.add(
+        'default',
+        { vacancyId: vacancy.id, profileId },
+        {
+          jobId: `match-${vacancy.id}-${profileId}`,
+          attempts: 4,
+          backoff: { type: 'exponential' as const, delay: 3000 },
+          removeOnComplete: { age: 86400, count: 1000 },
+          removeOnFail: { age: 7 * 86400 },
+        },
+      );
+    }
     this.logger.log(
-      {
-        msg: 'vacante normalizada',
-        vacancyId: vacancy.id,
-        provider: this.llm.name,
-        skills: extracted.skills.length,
-        requirements: extracted.keyRequirements.length,
-      },
+      { msg: 'match jobs encolados (por perfil)', vacancyId: vacancy.id, profiles: profiles.length },
       NormalizeService.name,
     );
+  }
+
+  /** Perfiles que ven esta fuente: selecciones habilitadas; si no hay → primario. */
+  private async targetProfileIds(sourceId: string): Promise<string[]> {
+    const selections = await this.prisma.profileSource.findMany({
+      where: { sourceId, enabled: true },
+      select: { profileId: true },
+    });
+    const ids = selections.map((s) => s.profileId);
+    if (ids.length > 0) return [...new Set(ids)];
+    const primary = await this.prisma.profile.findFirst({
+      where: { isPrimary: true },
+      select: { id: true },
+    });
+    return primary ? [primary.id] : [];
   }
 
   private buildUserPrompt(vacancy: unknown, cleaned: string): string {

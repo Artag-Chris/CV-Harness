@@ -1,6 +1,6 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Inject, Injectable } from '@nestjs/common';
-import { Prisma, VacancyStatus } from '@prisma/client';
+import { Prisma, VacancyProfileStatus, VacancyStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { JsonLogger } from '../../common/json-logger.service';
 import { PrismaService } from '../../common/prisma.service';
@@ -14,6 +14,7 @@ import {
 } from '../pipeline/pipeline.types';
 import { buildProfileSnapshot } from '../profiles/profile-snapshot';
 import { ResumesService } from '../resumes/resumes.service';
+import { recomputeVacancyAggregate } from '../vacancies/aggregate';
 
 // Peso del análisis con IA vs la similitud semántica en el score final.
 const WEIGHT_AI = 0.65;
@@ -51,27 +52,33 @@ export class MatchService {
     private readonly logger: JsonLogger,
   ) {}
 
-  async handle(vacancyId: string): Promise<void> {
+  /** Match N:M: un job por (vacante, perfil). */
+  async handle(vacancyId: string, profileId: string): Promise<void> {
     const vacancy = await this.prisma.vacancy.findUnique({
       where: { id: vacancyId },
       include: { source: true },
     });
     if (!vacancy) return;
+
+    const profile = await this.prisma.profile.findUnique({ where: { id: profileId } });
+    if (!profile) return;
+
+    // Estado por perfil: si ya se aplicó/ignoró para este perfil, no re-matchar.
+    const existing = await this.prisma.vacancyProfile.findUnique({
+      where: { vacancyId_profileId: { vacancyId, profileId } },
+    });
     if (
-      vacancy.status === VacancyStatus.APPLIED ||
-      vacancy.status === VacancyStatus.IGNORED
+      existing?.status === VacancyProfileStatus.APPLIED ||
+      existing?.status === VacancyProfileStatus.IGNORED
     ) {
       return;
     }
 
-    const profileSnapshot = await buildProfileSnapshot(
-      this.prisma,
-      vacancy.profileId,
-    );
+    const profileSnapshot = await buildProfileSnapshot(this.prisma, profileId);
 
-    // ── 1) Similitud semántica contra la HV activa del perfil (pgvector) ──
+    // ── 1) Similitud semántica contra la HV activa de ESTE perfil (pgvector) ──
     const semantic = await this.resumes.searchActiveResume(
-      vacancy.profileId,
+      profileId,
       this.buildSemanticQuery(vacancy),
       5,
     );
@@ -84,7 +91,7 @@ export class MatchService {
     );
     const outcome = ai
       ? MatchOutcomeSchema.parse(ai)
-      : await this.deterministicOutcome(vacancy);
+      : await this.deterministicOutcome(vacancy, profileId, profile.name);
 
     const analysisScore = Math.round(outcome.score);
     // ── 3) Score final híbrido ──
@@ -102,8 +109,15 @@ export class MatchService {
       suggestedChannel: outcome.applicationStrategy.suggestedChannel,
     };
 
+    // ── 4) Persistir VP + MatchResult (compuesto vacante+perfil) ──
+    await this.prisma.vacancyProfile.upsert({
+      where: { vacancyId_profileId: { vacancyId, profileId } },
+      update: { status: VacancyProfileStatus.MATCHED },
+      create: { vacancyId, profileId, status: VacancyProfileStatus.MATCHED },
+    });
+
     const matchResult = await this.prisma.matchResult.upsert({
-      where: { vacancyId: vacancy.id },
+      where: { vacancyId_profileId: { vacancyId, profileId } },
       update: {
         score,
         analysisScore,
@@ -115,7 +129,8 @@ export class MatchService {
         coverLetterDraft: outcome.coverLetterDraft || null,
       },
       create: {
-        vacancyId: vacancy.id,
+        vacancyId,
+        profileId,
         score,
         analysisScore,
         semanticScore,
@@ -127,23 +142,15 @@ export class MatchService {
       },
     });
 
-    await this.prisma.vacancy.update({
-      where: { id: vacancy.id },
-      data: {
-        matchScore: score,
-        status:
-          vacancy.status === VacancyStatus.RAW ||
-          vacancy.status === VacancyStatus.NORMALIZED
-            ? VacancyStatus.MATCHED
-            : vacancy.status,
-      },
-    });
+    await recomputeVacancyAggregate(this.prisma, vacancyId);
 
     const shouldGenerateResume = score >= env.MATCH_MIN_SCORE;
     this.logger.log(
       {
-        msg: 'match calculado',
-        vacancyId: vacancy.id,
+        msg: 'match calculado (por perfil)',
+        vacancyId,
+        profileId,
+        profileName: profile.name,
         source: vacancy.source?.name,
         score,
         verdict,
@@ -157,8 +164,8 @@ export class MatchService {
     if (shouldGenerateResume) {
       await this.resumeQueue.add(
         'default',
-        { vacancyId: vacancy.id },
-        this.jobOpts(matchResult.id),
+        { vacancyId, profileId },
+        this.jobOpts(`${matchResult.id}-${profileId}`),
       );
     }
   }
@@ -218,22 +225,24 @@ export class MatchService {
   }
 
   /** Respaldo determinístico (sin red): solape de skills con el perfil. */
-  private async deterministicOutcome(vacancy: {
-    id: string;
-    title: string;
-    company: string | null;
-    location: string | null;
-    profileId: string | null;
-    descriptionRaw: string;
-    enrichment: Prisma.JsonValue | null;
-  }): Promise<MatchOutcome> {
+  private async deterministicOutcome(
+    vacancy: {
+      title: string;
+      company: string | null;
+      location: string | null;
+      descriptionRaw: string;
+      enrichment: Prisma.JsonValue | null;
+    },
+    profileId: string,
+    profileName: string,
+  ): Promise<MatchOutcome> {
     const enr = (vacancy.enrichment ?? {}) as Record<string, unknown>;
     const vacancySkills = Array.isArray(enr.skills)
       ? (enr.skills as string[])
       : [];
 
-    const profile = await this.prisma.profile.findFirst({
-      where: vacancy.profileId ? { id: vacancy.profileId } : { isPrimary: true },
+    const profile = await this.prisma.profile.findUnique({
+      where: { id: profileId },
       include: { skills: { include: { skill: true } } },
     });
     const profileSkills = profile?.skills ?? [];

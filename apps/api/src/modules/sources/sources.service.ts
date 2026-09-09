@@ -87,7 +87,6 @@ export const UpsertSourceSchema = z.object({
   limits: LimitsSchema.optional(),
   enabled: z.boolean().default(true),
   intervalMinutes: z.number().int().positive().default(1440),
-  profileId: z.string().nullable().optional(),
 });
 
 export type UpsertSourceInput = z.infer<typeof UpsertSourceSchema>;
@@ -106,7 +105,14 @@ export class SourcesService {
       orderBy: { createdAt: 'asc' },
       include: {
         _count: { select: { vacancies: true } },
-        profile: { select: { id: true, name: true } },
+        selections: {
+          select: {
+            id: true,
+            enabled: true,
+            intervalMinutes: true,
+            profile: { select: { id: true, name: true } },
+          },
+        },
       },
     });
   }
@@ -115,13 +121,22 @@ export class SourcesService {
     return SOURCE_TEMPLATES;
   }
 
+  /** Sitios que vigila un perfil (selección N:M). */
   async listByProfile(profileId: string): Promise<Source[]> {
     return this.prisma.source.findMany({
-      where: { profileId },
+      where: { selections: { some: { profileId } } },
       orderBy: { createdAt: 'asc' },
       include: {
         _count: { select: { vacancies: true } },
-        profile: { select: { id: true, name: true } },
+        selections: {
+          where: { profileId },
+          select: {
+            id: true,
+            enabled: true,
+            intervalMinutes: true,
+            profile: { select: { id: true, name: true } },
+          },
+        },
       },
     });
   }
@@ -152,7 +167,6 @@ export class SourcesService {
         limits: limits as Prisma.InputJsonValue,
         enabled: data.enabled,
         intervalMinutes: data.intervalMinutes,
-        profileId: data.profileId ?? null,
       },
     });
   }
@@ -178,7 +192,6 @@ export class SourcesService {
         ...(data.intervalMinutes !== undefined && {
           intervalMinutes: data.intervalMinutes,
         }),
-        ...(data.profileId !== undefined && { profileId: data.profileId }),
       },
     });
   }

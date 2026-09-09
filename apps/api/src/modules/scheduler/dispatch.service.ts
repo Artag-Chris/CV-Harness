@@ -40,37 +40,47 @@ export class DispatchService {
     private readonly logger: JsonLogger,
   ) {}
 
-  /** Ciclo del cron: despacha las fuentes vencidas y los perfiles con cron propio. */
+  /** Ciclo del cron: fuentes vencidas + perfiles con cron propio (sus selecciones). */
   async runCycle(): Promise<number> {
     const now = new Date();
     let dispatched = 0;
-
-    // 1) Fuentes vencidas por su propia cadencia.
-    const dueSources = await this.prisma.source.findMany({
-      where: { enabled: true, nextRunAt: { lte: now } },
-    });
-    for (const source of dueSources) {
+    const dispatchedIds = new Set<string>();
+    const dispatchOnce = async (source: Source): Promise<boolean> => {
+      if (dispatchedIds.has(source.id)) return false;
+      dispatchedIds.add(source.id);
       try {
         await this.dispatchSource(source);
         dispatched += 1;
+        return true;
       } catch (err) {
         this.logger.error(
           { msg: 'dispatch failed', sourceId: source.id, err: String(err) },
           DispatchService.name,
         );
+        return false;
       }
-    }
+    };
 
-    // 2) Perfiles con cron propio (scheduleMinutes): corren TODAS sus fuentes.
+    // 1) Fuentes vencidas por su propia cadencia.
+    const dueSources = await this.prisma.source.findMany({
+      where: { enabled: true, nextRunAt: { lte: now } },
+    });
+    for (const source of dueSources) await dispatchOnce(source);
+
+    // 2) Perfiles con cron propio: corren los sitios que tienen seleccionados.
     const dueProfiles = await this.prisma.profile.findMany({
-      where: {
-        scheduleMinutes: { not: null },
-        nextRunAt: { lte: now },
+      where: { scheduleMinutes: { not: null }, nextRunAt: { lte: now } },
+      include: {
+        sources: {
+          where: { enabled: true },
+          include: { source: true },
+        },
       },
-      include: { sources: { where: { enabled: true } } },
     });
     for (const profile of dueProfiles) {
-      dispatched += await this.dispatchProfileSources(profile.id, profile.sources);
+      for (const sel of profile.sources) {
+        await dispatchOnce(sel.source);
+      }
       const interval = profile.scheduleMinutes ?? 0;
       await this.prisma.profile.update({
         where: { id: profile.id },
@@ -80,45 +90,33 @@ export class DispatchService {
 
     if (dueSources.length + dueProfiles.length > 0) {
       this.logger.log(
-        { msg: 'crawl-cycle done', sourcesDue: dueSources.length, profilesDue: dueProfiles.length, dispatched },
+        {
+          msg: 'crawl-cycle done',
+          sourcesDue: dueSources.length,
+          profilesDue: dueProfiles.length,
+          dispatched,
+        },
         DispatchService.name,
       );
     }
     return dispatched;
   }
 
-  /** Búsqueda manual de un perfil: despacha todas sus fuentes habilitadas. */
+  /** Búsqueda manual de un perfil: despacha sus sitios seleccionados y habilitados. */
   async runProfile(profileId: string): Promise<{ dispatched: number }> {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
-      include: { sources: { where: { enabled: true } } },
+      include: {
+        sources: { where: { enabled: true }, include: { source: true } },
+      },
     });
     if (!profile) throw new NotFoundException(`Profile ${profileId} no existe`);
-    const dispatched = await this.dispatchProfileSources(profile.id, profile.sources);
-    return { dispatched };
-  }
-
-  /**
-   * Despacha las fuentes de un perfil saltándose su nextRunAt individual
-   * (el cron del perfil manda).
-   */
-  private async dispatchProfileSources(
-    profileId: string,
-    sources: Source[],
-  ): Promise<number> {
     let dispatched = 0;
-    for (const source of sources) {
-      try {
-        await this.dispatchSource(source);
-        dispatched += 1;
-      } catch (err) {
-        this.logger.error(
-          { msg: 'dispatch failed (perfil)', profileId, sourceId: source.id, err: String(err) },
-          DispatchService.name,
-        );
-      }
+    for (const sel of profile.sources) {
+      await this.dispatchSource(sel.source);
+      dispatched += 1;
     }
-    return dispatched;
+    return { dispatched };
   }
 
   /** Disparo manual de una fuente (API), incluso si no está vencida. */

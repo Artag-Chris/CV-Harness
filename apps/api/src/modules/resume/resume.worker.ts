@@ -12,6 +12,7 @@ export class ResumeWorker extends WorkerHost {
 
   async process(job: Job): Promise<void> {
     const data = VacancyJobSchema.parse(job.data);
-    await this.resumes.handle(data.vacancyId);
+    if (!data.profileId) return;
+    await this.resumes.handle(data.vacancyId, data.profileId);
   }
 }

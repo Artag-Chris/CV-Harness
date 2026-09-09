@@ -36,10 +36,12 @@ model Profile {
   projects    Project[]
   skills      ProfileSkill[]
   links       ContactLink[]
-  sources     Source[]
+  sources     ProfileSource[]
   vacancies   Vacancy[]
   resumeDrafts ResumeDraft[]
   resumes     Resume[]
+  vacancyProfiles VacancyProfile[]
+  matches     MatchResult[]
 
   @@index([isPrimary])
 }
@@ -192,19 +194,41 @@ model Source {
   // Limites/politeness: { maxPages, delayMs, timeoutMs, userAgent, respectRobots }
   limits    Json     @default("{}")
   enabled   Boolean  @default(true)
-  intervalMinutes Int @default(1440) // cadencia propia de la fuente
+  intervalMinutes Int @default(1440) // cadencia por defecto del sitio
   lastRunAt DateTime?
   nextRunAt DateTime  @default(now())
-  profileId String? // perfil objetivo (si es null, aplica a todos)
 
-  profile Profile?  @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  runs     ScrapeRun[]
-  vacancies Vacancy[]
+  // Los perfiles que vigilan este sitio (selección N:M).
+  selections ProfileSource[]
+  runs       ScrapeRun[]
+  vacancies  Vacancy[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([enabled, nextRunAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Selección perfil ↔ sitio: qué URLs guardadas vigila cada perfil y con qué
+// cadencia propia. El cron del perfil recorre sus selecciones habilitadas.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model ProfileSource {
+  id        String   @id @default(cuid())
+  profileId String
+  sourceId  String
+  enabled   Boolean  @default(true)
+  // null → usa la cadencia del perfil (Profile.scheduleMinutes).
+  intervalMinutes Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  source  Source  @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([profileId, sourceId])
+  @@index([sourceId, enabled])
 }
 
 model ScrapeRun {
@@ -261,18 +285,52 @@ model Vacancy {
   updatedAt      DateTime      @updatedAt
 
   source   Source       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  profile  Profile?     @relation(fields: [profileId], references: [id], onDelete: SetNull)
-  match    MatchResult?
-  resume   ResumeDraft?
+  // Perfil "dueño" histórico (el de la fuente). El match real es N:M vía
+  // VacancyProfile/MatchResult con profileId.
+  profile         Profile?          @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  vacancyProfiles VacancyProfile[]
+  matches         MatchResult[]
+  drafts          ResumeDraft[]
 
   @@index([status])
   @@index([sourceId])
   @@index([profileId])
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// N:M Vacante ↔ Perfil: una vacante puede ser evaluada por varios perfiles y
+// cada perfil tiene su propio estado (PENDING→MATCHED→RESUME_READY→APPLIED/IGNORED).
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum VacancyProfileStatus {
+  PENDING
+  MATCHED
+  RESUME_READY
+  APPLIED
+  IGNORED
+}
+
+model VacancyProfile {
+  id        String               @id @default(cuid())
+  vacancyId String
+  profileId String
+  status    VacancyProfileStatus @default(PENDING)
+  appliedAt DateTime?
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  vacancy Vacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([vacancyId, profileId])
+  @@index([profileId, status])
+  @@index([vacancyId, status])
+}
+
 model MatchResult {
   id        String    @id @default(cuid())
-  vacancyId String    @unique
+  vacancyId String
+  profileId String
   // score final = blend(analysisScore, semanticScore) o analysisScore si no hay CV indexado.
   score     Int
   // Score del análisis con IA (o determinístico en modo mock).
@@ -289,11 +347,15 @@ model MatchResult {
   createdAt DateTime   @default(now())
 
   vacancy Vacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([vacancyId, profileId])
+  @@index([profileId])
 }
 
 model ResumeDraft {
   id        String   @id @default(cuid())
-  vacancyId String   @unique
+  vacancyId String
   profileId String
   // Secciones redactadas (JSONB): [{ heading, body }] + meta
   content   Json
@@ -306,6 +368,7 @@ model ResumeDraft {
   vacancy Vacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
   profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
+  @@unique([vacancyId, profileId])
   @@index([profileId])
 }
 

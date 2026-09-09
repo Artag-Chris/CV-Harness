@@ -33,7 +33,11 @@ export type ScraperResultPayload = z.infer<typeof ScraperResultPayloadSchema>;
 // Payloads de jobs BullMQ del pipeline
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const VacancyJobSchema = z.object({ vacancyId: z.string().min(1) });
+export const VacancyJobSchema = z.object({
+  vacancyId: z.string().min(1),
+  // N:M: el job de match/resume corre por perfil.
+  profileId: z.string().optional(),
+});
 export type VacancyJob = z.infer<typeof VacancyJobSchema>;
 
 export const NotificationJobSchema = z.object({
