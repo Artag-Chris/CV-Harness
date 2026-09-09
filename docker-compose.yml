@@ -1,11 +1,13 @@
 # cv-harness - Docker Compose
 #
 # Mismo patrón que atiende:
-#   - Postgres 16 dedicado (cvharness-postgres) sobre microservices-network.
+#   - Postgres 16 + pgvector dedicado (cvharness-postgres) sobre
+#     microservices-network (atiende usa su propio postgres; acá uno propio).
 #   - Redis COMPARTIDA vía microservices-network (hostname "redis:6379").
 #     Debe estar corriendo antes de iniciar (en atiende es la misma).
 #   - API en target development con hot-reload (src montado).
-#   - Worker Rust (scraping) + dashboard web como contenedores.
+#   - Worker Rust (scraping) como contenedor. El frontend vive en el proyecto
+#     dashboard/ (pestaña CV Harness), no se levanta acá.
 #
 # Uso en el server (Redis compartida ya corriendo):
 #   docker compose up -d
@@ -87,8 +89,9 @@ services:
       # Para que el seed cree la fuente fixture apuntando al contenedor de la
       # red (cvharness-fixture) en vez de localhost, que adentro es el propio api.
       FIXTURE_BASE_URL: ${FIXTURE_BASE_URL:-http://cvharness-fixture}
-      # FIXTURE_ENABLED=false (server) evita sembrar la fuente E2E habilitada.
-      FIXTURE_ENABLED: ${FIXTURE_ENABLED:-true}
+      # FIXTURE_ENABLED=false por defecto (server): la fuente E2E no se siembra.
+      # En dev local el .env la pone en true junto al profile "fixture".
+      FIXTURE_ENABLED: ${FIXTURE_ENABLED:-false}
     volumes:
       - ./apps/api/src:/app/src
       - ./apps/api/prisma:/app/prisma

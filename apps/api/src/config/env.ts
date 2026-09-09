@@ -16,6 +16,9 @@ const envSchema = z.object({
   QUEUE_PREFIX: z.string().default('cvharness'),
   GROQ_API_KEY: z.string().default(''),
   GROQ_MODEL: z.string().default('llama-3.3-70b-versatile'),
+  // DeepSeek (IA principal del harness; OpenAI-compatible).
+  DEEPSEEK_API_KEY: z.string().default(''),
+  DEEPSEEK_MODEL: z.string().default('deepseek-chat'),
   // Embeddings estilo atiende (OpenAI text-embedding-3-small → 1536 dims).
   OPENAI_API_KEY: z.string().default(''),
   EMBEDDING_MODEL: z.string().default('text-embedding-3-small'),
@@ -26,12 +29,12 @@ const envSchema = z.object({
   CRON_INTERVAL_MINUTES: z.coerce.number().default(15),
   MATCH_MIN_SCORE: z.coerce.number().default(65),
   FIXTURE_BASE_URL: z.string().default('http://localhost:8090'),
-  LLM_PROVIDER: z.enum(['auto', 'groq', 'mock']).default('auto'),
+  LLM_PROVIDER: z.enum(['auto', 'groq', 'deepseek', 'mock']).default('auto'),
   EMBEDDING_PROVIDER: z.enum(['auto', 'openai', 'mock']).default('auto'),
 });
 
 export type RawEnv = z.infer<typeof envSchema>;
-export type LlmMode = 'groq' | 'mock';
+export type LlmMode = 'deepseek' | 'groq' | 'mock';
 export type EmbedMode = 'openai' | 'mock';
 export type Env = RawEnv & { llmMode: LlmMode; embedMode: EmbedMode };
 
@@ -54,11 +57,15 @@ export function parseEnv(input: NodeJS.ProcessEnv = process.env): Env {
   const resolved = { ...input };
   resolved.REDIS_URL ??= resolveRedisUrl(input);
   const parsed = envSchema.parse(resolved);
+  // Orden: explícito > auto (deepseek > groq) > mock (E2E sin llaves).
   const llmMode: LlmMode =
-    parsed.LLM_PROVIDER === 'mock' ||
-    (parsed.LLM_PROVIDER === 'auto' && parsed.GROQ_API_KEY.length === 0)
-      ? 'mock'
-      : 'groq';
+    parsed.LLM_PROVIDER === 'deepseek' ||
+    (parsed.LLM_PROVIDER === 'auto' && parsed.DEEPSEEK_API_KEY.length > 0)
+      ? 'deepseek'
+      : parsed.LLM_PROVIDER === 'groq' ||
+          (parsed.LLM_PROVIDER === 'auto' && parsed.GROQ_API_KEY.length > 0)
+        ? 'groq'
+        : 'mock';
   const embedMode: EmbedMode =
     parsed.EMBEDDING_PROVIDER === 'mock' ||
     (parsed.EMBEDDING_PROVIDER === 'auto' && parsed.OPENAI_API_KEY.length === 0)

@@ -105,10 +105,16 @@ El api acepta `REDIS_URL` directo o la deriva de `REDIS_HOST` / `REDIS_PORT` /
 (default `cvharness`) para no pisarse con `atiende:dev`. El worker Rust usa la
 misma `REDIS_URL` (default en docker: `redis://redis:6379`).
 
-## Modo LLM
+## Modo LLM (patrón adaptador)
 
-- Sin `GROQ_API_KEY` el pipeline corre en **mock** (resultados determinísticos, sin red).
-- Con `GROQ_API_KEY` usa Groq (`llama-3.3-70b-versatile`) para normalizar, matchear y redactar. `LLM_PROVIDER=mock|groq|auto`.
+- **IA principal: DeepSeek** (`DEEPSEEK_API_KEY`, modelo `deepseek-chat` o
+  `deepseek-reasoner`) para normalizar, matchear y redactar la HV.
+- Fallbacks: Groq (`GROQ_API_KEY`) y `mock` determinístico (E2E sin llaves).
+  `LLM_PROVIDER=auto|deepseek|groq|mock` (auto: deepseek → groq → mock).
+- Agregar otro proveedor = implementar `LlmProvider` en `modules/llm/` y
+  registrarlo en `llm.module.ts` (nada del pipeline cambia).
+- Embeddings siguen en OpenAI (`OPENAI_API_KEY`; DeepSeek no ofrece embeddings)
+  con `mock` como respaldo sin red.
 
 ## Desarrollo nativo (sin docker)
 
