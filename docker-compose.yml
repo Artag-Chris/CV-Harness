@@ -3,9 +3,9 @@
 # SOLO lo necesario para correr el proyecto. NO crea base de datos ni redis:
 # en el server ya corren (misma red microservices-network que atiende):
 #   - Redis compartida  → hostname "redis:6379"
-#   - PostgreSQL        → hostname configurable (default "cvharness-postgres";
-#                         en el server de atiende suele ser "atiende-postgres")
-#                          con un database "cvharness" + extensión pgvector.
+#   - PostgreSQL        → el MISMO de atiende ("atiende-postgres", imagen
+#                         pgvector/pgvector:pg16, usuario atiende) con una
+#                         base "cvharness" propia (se crea una sola vez).
 #
 # Uso en el server:
 #   docker compose up -d          # levanta api + scraper
@@ -32,8 +32,8 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: ${API_PORT:-3100}
-      # Postgres EXTERNO (ya corriendo). Configura DATABASE_HOST según tu server.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-cvharness}:${POSTGRES_PASSWORD:-cvharness}@${DATABASE_HOST:-cvharness-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB:-cvharness}?schema=public
+      # Postgres EXTERNO: el de atiende (pgvector). Override en .env si cambia.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-atiende}:${POSTGRES_PASSWORD:-atiende_dev}@${DATABASE_HOST:-atiende-postgres}:${DATABASE_PORT:-5432}/${POSTGRES_DB:-cvharness}?schema=public
       # Redis compartida (ya corriendo como "redis" en la red).
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       REDIS_HOST: redis
