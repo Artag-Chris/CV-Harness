@@ -8,6 +8,10 @@ import { Prisma, Source } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma.service';
 import { originOf } from '../../common/url.util';
+import { SOURCE_TEMPLATES, type SourceTemplate } from './sources.templates';
+
+/** Re-export para quien importaba las plantillas desde este módulo. */
+export { SOURCE_TEMPLATES, type SourceTemplate };
 
 /**
  * Receta CSS de una fuente. `item` y `title` son el mínimo para extraer algo;
@@ -44,73 +48,9 @@ const LimitsSchema = z
   .default({});
 
 /**
- * Plantillas de portales para crear fuentes pegando solo la URL del listado.
- * El editor avanzado de selectores CSS queda disponible por API.
+ * Las plantillas viven en sources.templates.ts (sin dependencias de Prisma) y
+ * se re-exportan arriba para no romper a quien las importaba desde acá.
  */
-export interface SourceTemplate {
-  id: string;
-  label: string;
-  hint: string;
-  baseUrlDefault: string;
-  selectors: Record<string, unknown>;
-  limits: Record<string, unknown>;
-}
-
-export const SOURCE_TEMPLATES: SourceTemplate[] = [
-  {
-    id: 'computrabajo-co',
-    label: 'Computrabajo Colombia',
-    hint: 'URL del listado, ej. https://co.computrabajo.com/trabajo-de-desarrollador-y-programador',
-    // www.computrabajo.com.co redirige (301) a co.computrabajo.com.
-    baseUrlDefault: 'https://co.computrabajo.com',
-    // Selectores verificados contra el HTML real (2026-09):
-    //   <article class="box_offer …"> / <h2><a class="js-o-link">Título</a></h2>
-    //   empresa: <a class="t_ellipsis"> · ubicación: <p class="fs16 fc_base mt5"><span class="mr10">
-    //   salario: <div class="fs13 mt15"><span class="dIB mr10"> · publicada: <p class="fs13 fc_aux">
-    //   paginación: <span title="Siguiente" data-path="…?p=2"> (NO es <a href>)
-    selectors: {
-      item: 'article.box_offer',
-      title: 'h2 a.js-o-link',
-      company: 'a.t_ellipsis',
-      // :not(.dFlex) descarta el párrafo de la empresa, que en ofertas con
-      // calificación trae <span class="fx_none mr10">4,7</span>.
-      location: 'p.fs16.fc_base.mt5:not(.dFlex) span.mr10',
-      salary: 'div.fs13 span.dIB.mr10',
-      postedAt: 'p.fs13.fc_aux',
-      applyUrl: 'h2 a.js-o-link',
-      nextPage: '[title="Siguiente"]',
-      // El listado no trae la descripción: se baja la página de detalle.
-      fetchDetail: true,
-      detail: { description: 'div[div-link="oferta"]' },
-    },
-    limits: {
-      maxPages: 2,
-      delayMs: 1000,
-      timeoutMs: 20000,
-      // Computrabajo (Cloudflare) responde 403 a UAs no-navegador
-      // (`curl`, `cv-harness/0.1`): verificado 2026-09.
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      respectRobots: true,
-    },
-  },
-  {
-    id: 'jobsdev-fixture',
-    label: 'JobsDev Fixture (E2E local)',
-    hint: 'http://cvharness-fixture/jobs.html dentro de docker, o localhost:8090/jobs.html nativo',
-    baseUrlDefault: 'http://cvharness-fixture',
-    selectors: {
-      item: '.job-item',
-      title: '.job-title a',
-      company: '.job-company',
-      location: '.job-location',
-      postedAt: '.job-date',
-      description: '.job-description',
-      applyUrl: '.job-title a',
-    },
-    limits: { maxPages: 1, delayMs: 300, timeoutMs: 15000, respectRobots: false },
-  },
-];
 
 export const UpsertSourceSchema = z.object({
   name: z.string().min(1),
@@ -130,6 +70,19 @@ export type UpsertSourceInput = z.infer<typeof UpsertSourceSchema>;
 function resolveTemplate(templateId: string | undefined) {
   if (!templateId) return null;
   return SOURCE_TEMPLATES.find((t) => t.id === templateId) ?? null;
+}
+
+/**
+ * Valida con Zod traduciendo el fallo a un 400 legible. Sin esto, un error de
+ * validación sale como ZodError y Nest responde 500 "Internal server error".
+ */
+function parseOrBadRequest<T>(schema: z.ZodType<T>, input: unknown): T {
+  const result = schema.safeParse(input);
+  if (result.success) return result.data;
+  const detail = result.error.issues
+    .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`)
+    .join('; ');
+  throw new BadRequestException(`Datos inválidos — ${detail}`);
 }
 
 @Injectable()
@@ -187,7 +140,7 @@ export class SourcesService {
   }
 
   async create(input: unknown): Promise<Source> {
-    const data = UpsertSourceSchema.parse(input);
+    const data = parseOrBadRequest(UpsertSourceSchema, input);
     const template = resolveTemplate(data.templateId);
     if (!data.selectors && !template) {
       throw new BadRequestException(
@@ -215,7 +168,7 @@ export class SourcesService {
   async update(id: string, input: unknown): Promise<Source> {
     const source = await this.prisma.source.findUnique({ where: { id } });
     if (!source) throw new NotFoundException(`Source ${id} no existe`);
-    const data = UpsertSourceSchema.partial().parse(input);
+    const data = parseOrBadRequest(UpsertSourceSchema.partial(), input);
     return this.prisma.source.update({
       where: { id },
       data: {
@@ -237,17 +190,24 @@ export class SourcesService {
     });
   }
 
-  async remove(id: string): Promise<void> {
+  /**
+   * Borra una fuente. Por defecto se niega si ya trajo vacantes (para no perder
+   * historial sin querer); con `force` borra en cascada vacantes, matches,
+   * borradores y corridas.
+   */
+  async remove(id: string, force = false): Promise<{ deletedVacancies: number }> {
     const source = await this.prisma.source.findUnique({
       where: { id },
       include: { _count: { select: { vacancies: true } } },
     });
     if (!source) throw new NotFoundException(`Source ${id} no existe`);
-    if (source._count.vacancies > 0) {
+    const vacancies = source._count.vacancies;
+    if (vacancies > 0 && !force) {
       throw new ConflictException(
-        `La fuente tiene ${source._count.vacancies} vacantes: deshabilítala en vez de borrarla`,
+        `La fuente tiene ${vacancies} vacantes: deshabilítala, o confirmá el borrado (force=true) para eliminarla con sus vacantes`,
       );
     }
     await this.prisma.source.delete({ where: { id } });
+    return { deletedVacancies: vacancies };
   }
 }
