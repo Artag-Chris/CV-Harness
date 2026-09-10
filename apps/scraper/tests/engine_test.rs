@@ -303,4 +303,58 @@ mod tests {
         assert!(text.contains("Estamos buscando vendedores TAT"));
         assert!(text.contains("Requerimientos"));
     }
+
+    /// Contrato con el editor avanzado del dashboard: los nombres de campo
+    /// (camelCase) y el pageParam deben deserializar tal cual se envían.
+    #[test]
+    fn receta_del_editor_avanzado_deserializa() {
+        let req: ScrapeRequest = serde_json::from_value(serde_json::json!({
+            "schemaVersion": "1",
+            "requestId": "editor-1",
+            "sourceId": "src-editor",
+            "sourceName": "Portal propio",
+            "baseUrl": "https://portal.example",
+            "listUrl": "https://portal.example/empleos",
+            "recipe": {
+                "selectors": {
+                    "item": "div.result-item",
+                    "title": "a.js-offer-title",
+                    "company": "span.js-offer-company",
+                    "location": "span.info-city",
+                    "salary": "span.salary",
+                    "postedAt": "span.date",
+                    "applyUrl": "a.js-offer-title",
+                    "fetchDetail": true,
+                    "detail": { "description": "div[div-link='oferta']" }
+                },
+                "limits": {
+                    "maxPages": 3,
+                    "delayMs": 1000,
+                    "timeoutMs": 20000,
+                    "userAgent": "Mozilla/5.0 Chrome/131",
+                    "respectRobots": true,
+                    "pageParam": "page"
+                }
+            }
+        }))
+        .expect("el payload del editor debe deserializar");
+
+        assert_eq!(req.recipe.selectors.item, "div.result-item");
+        assert!(req.recipe.selectors.fetch_detail);
+        assert_eq!(req.recipe.limits.max_pages, 3);
+        assert_eq!(req.recipe.limits.page_param.as_deref(), Some("page"));
+        assert!(req.recipe.limits.respect_robots);
+    }
+
+    /// Sin pageParam la receta sigue siendo válida (paginación por link "next").
+    #[test]
+    fn page_param_es_opcional() {
+        let mut value = computrabajo_json();
+        value["recipe"]["limits"]
+            .as_object_mut()
+            .unwrap()
+            .remove("pageParam");
+        let req: ScrapeRequest = serde_json::from_value(value).unwrap();
+        assert_eq!(req.recipe.limits.page_param, None);
+    }
 }

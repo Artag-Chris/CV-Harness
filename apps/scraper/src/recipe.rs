@@ -57,6 +57,11 @@ pub struct Limits {
     pub user_agent: String,
     #[serde(default)]
     pub respect_robots: bool,
+    /// Nombre del parámetro de paginación (ej. "page"). Cuando está presente,
+    /// el motor construye las URLs `?page=N` en vez de seguir un link "next".
+    /// Necesario para portales cuya paginación se dibuja con JavaScript.
+    #[serde(default)]
+    pub page_param: Option<String>,
 }
 
 fn default_max_pages() -> u32 {
@@ -80,6 +85,7 @@ impl Default for Limits {
             timeout_ms: default_timeout_ms(),
             user_agent: default_user_agent(),
             respect_robots: false,
+            page_param: None,
         }
     }
 }

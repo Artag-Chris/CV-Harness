@@ -244,9 +244,39 @@ pub fn parse_page(req: &ScrapeRequest, html: &str) -> Result<ParsedPage, String>
     Ok(ParsedPage { items, next_page })
 }
 
+/// Construye la URL de la página N cuando la receta pagina por parámetro
+/// (`?page=2`). Si la URL ya traía ese parámetro, se reemplaza.
+fn page_url(base: &str, param: &str, page: u32) -> Result<String, String> {
+    let mut url = Url::parse(base).map_err(|e| format!("listUrl inválida: {e}"))?;
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(k, _)| k != param)
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    {
+        let mut qp = url.query_pairs_mut();
+        qp.clear();
+        for (k, v) in &pairs {
+            qp.append_pair(k, v);
+        }
+        qp.append_pair(param, &page.to_string());
+    }
+    url.set_fragment(None);
+    Ok(url.to_string())
+}
+
 pub async fn run(req: &ScrapeRequest, client: &reqwest::Client) -> Result<Vec<ScrapedItem>, String> {
     let parsed = Parsed::from_recipe(&req.recipe)?;
     let mut items: Vec<ScrapedItem> = Vec::new();
+    // Paginación por parámetro (?page=N) o por link "next" del propio HTML.
+    let page_param = req
+        .recipe
+        .limits
+        .page_param
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty());
+    let total_pages = req.recipe.limits.max_pages.max(1);
     let mut current_url: String = req.list_url.clone();
 
     // respeto básico de robots.txt (si la fuente lo pide)
@@ -259,18 +289,22 @@ pub async fn run(req: &ScrapeRequest, client: &reqwest::Client) -> Result<Vec<Sc
         }
     }
 
-    for page in 1..=req.recipe.limits.max_pages.max(1) {
+    for page in 1..=total_pages {
         if page > 1 {
             polite_sleep(&req.recipe).await;
         }
+        let page_url_to_fetch = match page_param {
+            Some(param) => page_url(&req.list_url, param, page)?,
+            None => current_url.clone(),
+        };
         info!(
             request_id = %req.request_id,
             source = ?req.source_name,
-            url = %current_url,
+            url = %page_url_to_fetch,
             page,
             "fetching página"
         );
-        let html = fetch(client, &current_url, &req.recipe).await?;
+        let html = fetch(client, &page_url_to_fetch, &req.recipe).await?;
         let parsed_page = parse_page(req, &html)?;
         let mut page_items = parsed_page.items;
 
@@ -284,9 +318,12 @@ pub async fn run(req: &ScrapeRequest, client: &reqwest::Client) -> Result<Vec<Sc
         items.append(&mut page_items);
         debug!(request_id = %req.request_id, page, page_items = count, "items en página");
 
-        // Paginación: siguiente página si existe y no superamos el tope.
-        if page >= req.recipe.limits.max_pages {
+        if page >= total_pages {
             break;
+        }
+        // Con pageParam el loop construye la siguiente URL: nada que seguir.
+        if page_param.is_some() {
+            continue;
         }
         match parsed_page.next_page {
             Some(href) => {
@@ -301,4 +338,41 @@ pub async fn run(req: &ScrapeRequest, client: &reqwest::Client) -> Result<Vec<Sc
     }
 
     Ok(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_url_agrega_el_parametro() {
+        assert_eq!(
+            page_url("https://x.com/ofertas", "page", 2).unwrap(),
+            "https://x.com/ofertas?page=2"
+        );
+    }
+
+    #[test]
+    fn page_url_conserva_otros_query_params() {
+        assert_eq!(
+            page_url("https://x.com/ofertas?q=dev&ciudad=cali", "page", 3).unwrap(),
+            "https://x.com/ofertas?q=dev&ciudad=cali&page=3"
+        );
+    }
+
+    #[test]
+    fn page_url_reemplaza_el_parametro_existente() {
+        assert_eq!(
+            page_url("https://x.com/ofertas?page=1&q=dev", "page", 4).unwrap(),
+            "https://x.com/ofertas?q=dev&page=4"
+        );
+    }
+
+    #[test]
+    fn page_url_descarta_fragmento() {
+        assert_eq!(
+            page_url("https://x.com/ofertas#top", "page", 2).unwrap(),
+            "https://x.com/ofertas?page=2"
+        );
+    }
 }

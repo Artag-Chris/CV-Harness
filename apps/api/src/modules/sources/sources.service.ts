@@ -8,7 +8,18 @@ import { Prisma, Source } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma.service';
 
-const SelectorRecipeSchema = z.record(z.any());
+/**
+ * Receta CSS de una fuente. `item` y `title` son el mínimo para extraer algo;
+ * el resto es opcional. El editor avanzado del dashboard arma este objeto.
+ */
+const SelectorRecipeSchema = z
+  .record(z.any())
+  .refine((s) => typeof s?.item === 'string' && s.item.trim().length > 0, {
+    message: 'selectors.item es obligatorio (selector CSS de cada vacante)',
+  })
+  .refine((s) => typeof s?.title === 'string' && s.title.trim().length > 0, {
+    message: 'selectors.title es obligatorio (selector CSS del título)',
+  });
 
 /** Campos de la última corrida que la UI muestra para diagnosticar fallos. */
 const LAST_RUN_SELECT = {
@@ -26,6 +37,8 @@ const LimitsSchema = z
     timeoutMs: z.number().int().positive().default(20000),
     userAgent: z.string().default('cv-harness/0.1'),
     respectRobots: z.boolean().default(false),
+    // Paginación por parámetro (?page=2) para portales que la dibujan con JS.
+    pageParam: z.string().trim().min(1).optional(),
   })
   .default({});
 
