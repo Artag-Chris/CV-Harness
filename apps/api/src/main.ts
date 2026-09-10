@@ -24,8 +24,18 @@ async function bootstrap(): Promise<void> {
     jsonDocumentUrl: 'api/docs-json',
   });
 
-  await app.listen(env.PORT);
   const logger = app.get(JsonLogger);
+  if (env.JWT_SECRET === 'dev-secret-change-me') {
+    logger.warn(
+      {
+        msg: 'JWT_SECRET está en el valor por defecto: el dashboard de atiende dará 401 en la pestaña CV.',
+        fix: 'Copiá el JWT_SECRET real de atiende en cv-harness/.env y recreá el contenedor api.',
+      },
+      'Bootstrap',
+    );
+  }
+
+  await app.listen(env.PORT);
   logger.log(
     {
       msg: 'cv-harness api escuchando',
