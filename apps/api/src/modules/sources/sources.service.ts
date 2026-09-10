@@ -9,6 +9,16 @@ import { z } from 'zod';
 import { PrismaService } from '../../common/prisma.service';
 
 const SelectorRecipeSchema = z.record(z.any());
+
+/** Campos de la última corrida que la UI muestra para diagnosticar fallos. */
+const LAST_RUN_SELECT = {
+  status: true,
+  error: true,
+  itemsFound: true,
+  itemsNew: true,
+  startedAt: true,
+} as const;
+
 const LimitsSchema = z
   .object({
     maxPages: z.number().int().positive().default(1),
@@ -36,25 +46,37 @@ export const SOURCE_TEMPLATES: SourceTemplate[] = [
   {
     id: 'computrabajo-co',
     label: 'Computrabajo Colombia',
-    hint: 'URL del listado, ej. https://www.computrabajo.com.co/trabajo-de-desarrollador-y-programador',
-    baseUrlDefault: 'https://www.computrabajo.com.co',
+    hint: 'URL del listado, ej. https://co.computrabajo.com/trabajo-de-desarrollador-y-programador',
+    // www.computrabajo.com.co redirige (301) a co.computrabajo.com.
+    baseUrlDefault: 'https://co.computrabajo.com',
+    // Selectores verificados contra el HTML real (2026-09):
+    //   <article class="box_offer …"> / <h2><a class="js-o-link">Título</a></h2>
+    //   empresa: <a class="t_ellipsis"> · ubicación: <p class="fs16 fc_base mt5"><span class="mr10">
+    //   salario: <div class="fs13 mt15"><span class="dIB mr10"> · publicada: <p class="fs13 fc_aux">
+    //   paginación: <span title="Siguiente" data-path="…?p=2"> (NO es <a href>)
     selectors: {
-      item: 'article.box_oferta, .b-ox-oferta',
-      title: 'h2 a, .tOferta a',
-      company: '.dataOferta .e, .dOferta .e',
-      location: '.dataOferta .d, .lc',
-      postedAt: '.dataOferta .f, .fc',
-      description: '.dOferta .fs16, .cOferta',
-      applyUrl: 'h2 a',
-      nextPage: 'a[title="Siguiente"]',
+      item: 'article.box_offer',
+      title: 'h2 a.js-o-link',
+      company: 'a.t_ellipsis',
+      // :not(.dFlex) descarta el párrafo de la empresa, que en ofertas con
+      // calificación trae <span class="fx_none mr10">4,7</span>.
+      location: 'p.fs16.fc_base.mt5:not(.dFlex) span.mr10',
+      salary: 'div.fs13 span.dIB.mr10',
+      postedAt: 'p.fs13.fc_aux',
+      applyUrl: 'h2 a.js-o-link',
+      nextPage: '[title="Siguiente"]',
+      // El listado no trae la descripción: se baja la página de detalle.
       fetchDetail: true,
-      detail: { description: '.box_detalle_oferta, .ficha_oferta' },
+      detail: { description: 'div[div-link="oferta"]' },
     },
     limits: {
       maxPages: 2,
-      delayMs: 1500,
+      delayMs: 1000,
       timeoutMs: 20000,
-      userAgent: 'cv-harness/0.1 (+tracker personal de vacantes)',
+      // Computrabajo (Cloudflare) responde 403 a UAs no-navegador
+      // (`curl`, `cv-harness/0.1`): verificado 2026-09.
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       respectRobots: true,
     },
   },
@@ -100,11 +122,13 @@ function resolveTemplate(templateId: string | undefined) {
 export class SourcesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(): Promise<Source[]> {
+  async list() {
     return this.prisma.source.findMany({
       orderBy: { createdAt: 'asc' },
       include: {
         _count: { select: { vacancies: true } },
+        // Última corrida: hace visible en la UI si el scrape falló (403, timeout…).
+        runs: { take: 1, orderBy: { startedAt: 'desc' }, select: LAST_RUN_SELECT },
         selections: {
           select: {
             id: true,
@@ -122,12 +146,13 @@ export class SourcesService {
   }
 
   /** Sitios que vigila un perfil (selección N:M). */
-  async listByProfile(profileId: string): Promise<Source[]> {
+  async listByProfile(profileId: string) {
     return this.prisma.source.findMany({
       where: { selections: { some: { profileId } } },
       orderBy: { createdAt: 'asc' },
       include: {
         _count: { select: { vacancies: true } },
+        runs: { take: 1, orderBy: { startedAt: 'desc' }, select: LAST_RUN_SELECT },
         selections: {
           where: { profileId },
           select: {

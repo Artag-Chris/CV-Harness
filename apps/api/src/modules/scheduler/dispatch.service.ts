@@ -72,7 +72,8 @@ export class DispatchService {
       where: { scheduleMinutes: { not: null }, nextRunAt: { lte: now } },
       include: {
         sources: {
-          where: { enabled: true },
+          // Solo si la selección está activa Y la fuente no está deshabilitada globalmente.
+          where: { enabled: true, source: { enabled: true } },
           include: { source: true },
         },
       },
@@ -107,7 +108,7 @@ export class DispatchService {
     const profile = await this.prisma.profile.findUnique({
       where: { id: profileId },
       include: {
-        sources: { where: { enabled: true }, include: { source: true } },
+        sources: { where: { enabled: true, source: { enabled: true } }, include: { source: true } },
       },
     });
     if (!profile) throw new NotFoundException(`Profile ${profileId} no existe`);

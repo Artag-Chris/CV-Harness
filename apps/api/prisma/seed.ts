@@ -105,25 +105,29 @@ async function seedSources() {
     // La fixture apunta a localhost:8090 fijo; si FIXTURE_BASE_URL cambió, se ajusta.
     const listUrl = src.listUrl.replace('http://localhost:8090', FIXTURE_BASE_URL ?? 'http://localhost:8090');
     const baseUrl = src.baseUrl.replace('http://localhost:8090', FIXTURE_BASE_URL ?? 'http://localhost:8090');
-    const existing = await prisma.source.findFirst({ where: { listUrl } });
+    // La fuente E2E se crea habilitada solo si FIXTURE_ENABLED=true.
+    const enabled = src.matchKey === 'JobsDev' ? fixtureEnabled : src.enabled;
+    const data = {
+      name: src.name,
+      kind: src.kind,
+      baseUrl,
+      listUrl,
+      selectors: src.selectors as unknown as Prisma.InputJsonValue,
+      limits: src.limits as unknown as Prisma.InputJsonValue,
+      enabled,
+      intervalMinutes: src.intervalMinutes,
+    };
+    const existing = await prisma.source.findFirst({
+      where: { OR: [{ listUrl }, { name: { startsWith: src.matchKey } }] },
+    });
     if (existing) {
-      console.log(`[seed] fuente "${src.name}" ya existe — omitido`);
+      // Autorreparación: reescribe la receta built-in. Los selectores de los
+      // portales se rompen con los rediseños; así el arranque los corrige.
+      await prisma.source.update({ where: { id: existing.id }, data });
+      console.log(`[seed] fuente "${src.name}" actualizada (receta)`);
       continue;
     }
-    // La fuente E2E se crea habilitada solo si FIXTURE_ENABLED=true.
-    const enabled = src.name.startsWith('JobsDev') ? fixtureEnabled : src.enabled;
-    await prisma.source.create({
-      data: {
-        name: src.name,
-        kind: src.kind,
-        baseUrl,
-        listUrl,
-        selectors: src.selectors as unknown as Prisma.InputJsonValue,
-        limits: src.limits as unknown as Prisma.InputJsonValue,
-        enabled,
-        intervalMinutes: src.intervalMinutes,
-      },
-    });
+    await prisma.source.create({ data });
     console.log(`[seed] fuente creada: ${src.name}${enabled ? '' : ' (deshabilitada)'}`);
   }
 }

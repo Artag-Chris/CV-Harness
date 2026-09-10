@@ -15,6 +15,7 @@ struct Parsed {
     title: Option<Selector>,
     company: Option<Selector>,
     location: Option<Selector>,
+    salary: Option<Selector>,
     posted_at: Option<Selector>,
     description: Option<Selector>,
     apply_url: Option<Selector>,
@@ -24,40 +25,61 @@ struct Parsed {
 
 impl Parsed {
     fn from_recipe(recipe: &Recipe) -> Result<Self, String> {
-        let parse = |s: &Option<String>| -> Result<Option<Selector>, String> {
-            match s {
-                Some(sel) => Selector::parse(sel)
-                    .map(Some)
-                    .map_err(|e| format!("selector inválido '{sel}': {e}")),
-                None => Ok(None),
+        // Un selector OPCIONAL inválido (p.ej. sintaxis de Playwright como
+        // `:has-text()`) no debe tumbar toda la receta: se descarta el campo y
+        // se sigue. Solo `item`, que es obligatorio, aborta la receta.
+        let parse = |s: &Option<String>| -> Option<Selector> {
+            let Some(raw) = s else { return None };
+            match Selector::parse(raw) {
+                Ok(sel) => Some(sel),
+                Err(e) => {
+                    warn!(selector = %raw, error = %e, "selector opcional inválido: se ignora");
+                    None
+                }
             }
         };
         Ok(Self {
             item: Selector::parse(&recipe.selectors.item)
                 .map_err(|e| format!("selector item inválido: {e}"))?,
-            title: parse(&recipe.selectors.title)?,
-            company: parse(&recipe.selectors.company)?,
-            location: parse(&recipe.selectors.location)?,
-            posted_at: parse(&recipe.selectors.posted_at)?,
-            description: parse(&recipe.selectors.description)?,
-            apply_url: parse(&recipe.selectors.apply_url)?,
-            next_page: parse(&recipe.selectors.next_page)?,
+            title: parse(&recipe.selectors.title),
+            company: parse(&recipe.selectors.company),
+            location: parse(&recipe.selectors.location),
+            salary: parse(&recipe.selectors.salary),
+            posted_at: parse(&recipe.selectors.posted_at),
+            description: parse(&recipe.selectors.description),
+            apply_url: parse(&recipe.selectors.apply_url),
+            next_page: parse(&recipe.selectors.next_page),
             detail_description: parse(
                 &recipe
                     .selectors
                     .detail
                     .as_ref()
                     .and_then(|d| d.description.clone()),
-            )?,
+            ),
         })
     }
 }
 
+/// Absolutiza un href contra la base y descarta el fragmento (`#lc=…`), que
+/// varía entre listados y generaría fingerprints distintos de la misma oferta.
 fn absolute_url(base: &str, href: &str) -> Option<String> {
-    Url::parse(base)
-        .and_then(|b| b.join(href))
-        .map(|u| u.to_string())
-        .ok()
+    let mut url = Url::parse(base).and_then(|b| b.join(href)).ok()?;
+    url.set_fragment(None);
+    Some(url.to_string())
+}
+
+/// Atributo con la URL destino: cubre `<a href>` y los `<span data-path>`
+/// que usan algunos portales para la paginación.
+fn link_attr(element: ElementRef<'_>) -> Option<String> {
+    let value = element.value();
+    for attr in ["href", "data-path", "data-href", "data-url"] {
+        if let Some(found) = value.attr(attr) {
+            if !found.trim().is_empty() {
+                return Some(found.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn first_text<'a>(element: ElementRef<'a>, sel: &Selector) -> Option<String> {
@@ -70,12 +92,16 @@ fn first_text<'a>(element: ElementRef<'a>, sel: &Selector) -> Option<String> {
 }
 
 fn first_href(element: ElementRef<'_>, sel: &Selector) -> Option<String> {
-    element.select(sel).next().and_then(|e| {
-        e.value()
-            .attr("href")
-            .or_else(|| e.select(&Selector::parse("a").ok()?).next()?.value().attr("href"))
-            .map(String::from)
-    })
+    element
+        .select(sel)
+        .next()
+        .and_then(link_attr)
+        .or_else(|| {
+            element
+                .select(&Selector::parse("a").ok()?)
+                .next()
+                .and_then(link_attr)
+        })
 }
 
 async fn fetch(client: &reqwest::Client, url: &str, recipe: &Recipe) -> Result<String, String> {
@@ -150,9 +176,7 @@ fn extract_item(
         .apply_url
         .as_ref()
         .and_then(|s| first_href(item, s))
-        .or_else(|| {
-            item.select(&Selector::parse("a").ok()?).next()?.value().attr("href").map(String::from)
-        });
+        .or_else(|| item.select(&Selector::parse("a").ok()?).next().and_then(link_attr));
     let url = href.as_deref().and_then(|h| absolute_url(&req.base_url, h));
 
     let desc_html = parsed
@@ -166,7 +190,7 @@ fn extract_item(
         title,
         company: parsed.company.as_ref().and_then(|s| first_text(item, s)),
         location: parsed.location.as_ref().and_then(|s| first_text(item, s)),
-        salary: None,
+        salary: parsed.salary.as_ref().and_then(|s| first_text(item, s)),
         modality: None,
         posted_at: parsed.posted_at.as_ref().and_then(|s| first_text(item, s)),
         description_text: desc_html.as_deref().map(html_to_text).filter(|t| !t.is_empty()),
@@ -197,6 +221,29 @@ async fn fetch_detail_description(
     }
 }
 
+/// Una página ya parseada: los items del listado y el link a la siguiente.
+pub struct ParsedPage {
+    pub items: Vec<ScrapedItem>,
+    pub next_page: Option<String>,
+}
+
+/// Parsea una página de listado con la receta (sin red, sin detalle).
+/// Público para poder probar recetas contra HTML guardado.
+pub fn parse_page(req: &ScrapeRequest, html: &str) -> Result<ParsedPage, String> {
+    let parsed = Parsed::from_recipe(&req.recipe)?;
+    let doc = Html::parse_document(html);
+    let items = doc
+        .select(&parsed.item)
+        .filter_map(|el| extract_item(el, &parsed, req))
+        .collect();
+    let next_page = parsed
+        .next_page
+        .as_ref()
+        .and_then(|s| doc.select(s).next())
+        .and_then(link_attr);
+    Ok(ParsedPage { items, next_page })
+}
+
 pub async fn run(req: &ScrapeRequest, client: &reqwest::Client) -> Result<Vec<ScrapedItem>, String> {
     let parsed = Parsed::from_recipe(&req.recipe)?;
     let mut items: Vec<ScrapedItem> = Vec::new();
@@ -224,32 +271,26 @@ pub async fn run(req: &ScrapeRequest, client: &reqwest::Client) -> Result<Vec<Sc
             "fetching página"
         );
         let html = fetch(client, &current_url, &req.recipe).await?;
-        let doc = Html::parse_document(&html);
+        let parsed_page = parse_page(req, &html)?;
+        let mut page_items = parsed_page.items;
 
-        let mut page_items = 0usize;
-        for el in doc.select(&parsed.item) {
-            let Some(mut item) = extract_item(el, &parsed, req) else { continue };
+        for item in page_items.iter_mut() {
             if item.description_text.is_none() && req.recipe.selectors.fetch_detail {
-                fetch_detail_description(client, req, &parsed, &mut item).await;
+                fetch_detail_description(client, req, &parsed, item).await;
                 polite_sleep(&req.recipe).await;
             }
-            items.push(item);
-            page_items += 1;
         }
-        debug!(request_id = %req.request_id, page, page_items, "items en página");
+        let count = page_items.len();
+        items.append(&mut page_items);
+        debug!(request_id = %req.request_id, page, page_items = count, "items en página");
 
         // Paginación: siguiente página si existe y no superamos el tope.
         if page >= req.recipe.limits.max_pages {
             break;
         }
-        let next = parsed
-            .next_page
-            .as_ref()
-            .and_then(|s| doc.select(s).next())
-            .and_then(|e| e.value().attr("href"));
-        match next {
+        match parsed_page.next_page {
             Some(href) => {
-                let joined = absolute_url(&req.base_url, href).ok_or("next_page href no resoluble")?;
+                let joined = absolute_url(&req.base_url, &href).ok_or("next_page href no resoluble")?;
                 if joined == current_url {
                     break; // evita loop infinito
                 }
