@@ -25,13 +25,16 @@ export class VacanciesController {
     @Query('q') q?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
+    @Query('minScore') minScore?: string,
   ) {
+    const parsedMin = minScore != null && minScore !== '' ? Number(minScore) : undefined;
     return this.vacancies.list({
       status: (status as VacancyStatus) || 'ALL',
       sourceId,
       q,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
+      minScore: parsedMin != null && Number.isFinite(parsedMin) ? parsedMin : undefined,
     });
   }
 

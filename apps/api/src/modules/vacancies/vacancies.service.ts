@@ -9,6 +9,8 @@ export interface VacancyListQuery {
   q?: string;
   limit?: number;
   offset?: number;
+  /** Solo vacantes con algún match >= minScore (evita listar el ruido). */
+  minScore?: number;
 }
 
 const ALLOWED_STATUS: VacancyStatus[] = [
@@ -63,6 +65,11 @@ export class VacanciesService {
     const where: Prisma.VacancyWhereInput = {
       ...(statusFilter ? { status: statusFilter } : {}),
       ...(query.sourceId ? { sourceId: query.sourceId } : {}),
+      // Al menos un perfil con match suficiente. Sin esto, todo lo que el
+      // scraping trae (incluido lo que no encaja) inunda la pestaña Vacantes.
+      ...(typeof query.minScore === 'number' && Number.isFinite(query.minScore)
+        ? { matches: { some: { score: { gte: query.minScore } } } }
+        : {}),
       ...(query.q
         ? {
             OR: [
