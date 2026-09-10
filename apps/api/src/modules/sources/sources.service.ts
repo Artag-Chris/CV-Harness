@@ -7,6 +7,7 @@ import {
 import { Prisma, Source } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma.service';
+import { originOf } from '../../common/url.util';
 
 /**
  * Receta CSS de una fuente. `item` y `title` son el mínimo para extraer algo;
@@ -199,7 +200,9 @@ export class SourcesService {
       data: {
         name: data.name,
         kind: data.kind,
-        baseUrl: data.baseUrl ?? template?.baseUrlDefault ?? '',
+        // Con receta propia no hay baseUrl: se deriva del origen del listado,
+        // para poder absolutizar los href relativos de cada oferta.
+        baseUrl: data.baseUrl ?? template?.baseUrlDefault ?? originOf(data.listUrl),
         listUrl: data.listUrl,
         selectors: selectors as Prisma.InputJsonValue,
         limits: limits as Prisma.InputJsonValue,

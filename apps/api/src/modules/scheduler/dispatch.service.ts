@@ -7,6 +7,7 @@ import { newRequestId } from '../../common/hash.util';
 import { PrismaService } from '../../common/prisma.service';
 import { STREAMS } from '../../config/queue.config';
 import { REDIS } from '../../config/tokens';
+import { originOf } from '../../common/url.util';
 import { NotificationService } from '../notification/notification.service';
 
 export type CrawlJobData =
@@ -140,7 +141,9 @@ export class DispatchService {
       requestId,
       sourceId: source.id,
       sourceName: source.name,
-      baseUrl: source.baseUrl,
+      // Fallback para fuentes creadas sin baseUrl: sin esto los href relativos
+      // de las ofertas no se pueden absolutizar y todas caen a listUrl.
+      baseUrl: source.baseUrl?.trim() || originOf(source.listUrl),
       listUrl: source.listUrl,
       recipe: { selectors: source.selectors, limits: source.limits },
     };
