@@ -53,4 +53,13 @@ export class VacanciesController {
     const updated = await this.vacancies.setStatus(id, body.status, body.profileId);
     return { ok: true, vacancy: updated };
   }
+
+  /**
+   * Fuerza la generación de HV (y su carta) aunque el match no llegue al umbral.
+   * Es una acción explícita del usuario, no automática.
+   */
+  @Post(':id/generate-resume')
+  generateResume(@Param('id') id: string, @Query('profileId') profileId?: string) {
+    return this.vacancies.enqueueResume(id, profileId);
+  }
 }

@@ -82,8 +82,9 @@ export class NormalizeService {
       },
     });
 
-    // Fan-out N:M: un job de match por cada perfil que vigila la fuente.
-    const profiles = await this.targetProfileIds(vacancy.sourceId);
+    // Fan-out N:M: un job de match por cada perfil que ve la vacante (o solo el
+    // perfil elegido, si la vacante se cargó dirigida a uno — oferta pegada).
+    const profiles = await this.targetProfileIds(vacancy.sourceId, vacancy.profileId);
     for (const profileId of profiles) {
       await this.prisma.vacancyProfile.upsert({
         where: { vacancyId_profileId: { vacancyId: vacancy.id, profileId } },
@@ -108,8 +109,16 @@ export class NormalizeService {
     );
   }
 
-  /** Perfiles que ven esta fuente: selecciones habilitadas; si no hay → primario. */
-  private async targetProfileIds(sourceId: string): Promise<string[]> {
+  /**
+   * Perfiles que ven esta vacante: si la vacante viene dirigida a uno (ofertas
+   * pegadas a mano) solo ese; si no, las selecciones habilitadas de la fuente y,
+   * si no hay ninguna, el perfil primario.
+   */
+  private async targetProfileIds(
+    sourceId: string,
+    directedProfileId: string | null,
+  ): Promise<string[]> {
+    if (directedProfileId) return [directedProfileId];
     const selections = await this.prisma.profileSource.findMany({
       where: { sourceId, enabled: true },
       select: { profileId: true },

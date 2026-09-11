@@ -6,6 +6,7 @@ import { JsonLogger } from '../../common/json-logger.service';
 import { PrismaService } from '../../common/prisma.service';
 import { queueName, QUEUES } from '../../config/queue.config';
 import { LLM_PROVIDER } from '../../config/tokens';
+import { CoverLetterService } from '../cover-letter/cover-letter.service';
 import { LlmProvider } from '../llm/llm-provider.port';
 import {
   ResumeContent,
@@ -41,6 +42,7 @@ export class ResumeService {
     @Inject(LLM_PROVIDER) private readonly llm: LlmProvider,
     @InjectQueue(queueName(QUEUES.NOTIFICATION))
     private readonly notificationQueue: Queue,
+    private readonly coverLetter: CoverLetterService,
     private readonly logger: JsonLogger,
   ) {}
 
@@ -117,6 +119,20 @@ export class ResumeService {
     });
 
     await recomputeVacancyAggregate(this.prisma, vacancyId);
+
+    // Las ofertas pegadas a mano piden la carta de una: viaja marcado en `raw`.
+    // Aislado en try/catch para que un fallo de la carta nunca rompa la HV.
+    const raw = (vacancy.raw ?? {}) as { autoCoverLetter?: boolean };
+    if (raw.autoCoverLetter) {
+      try {
+        await this.coverLetter.generate(resume.id);
+      } catch (err) {
+        this.logger.error(
+          { msg: 'no se pudo generar la carta automática', vacancyId, resumeId: resume.id, err },
+          ResumeService.name,
+        );
+      }
+    }
 
     await this.notificationQueue.add(
       'default',

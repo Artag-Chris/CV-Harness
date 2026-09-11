@@ -1,6 +1,9 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
 import { Prisma, VacancyProfileStatus, VacancyStatus } from '@prisma/client';
+import { Queue } from 'bullmq';
 import { PrismaService } from '../../common/prisma.service';
+import { queueName, QUEUES } from '../../config/queue.config';
 import { recomputeVacancyAggregate } from './aggregate';
 
 export interface VacancyListQuery {
@@ -25,7 +28,7 @@ const ALLOWED_STATUS: VacancyStatus[] = [
 ];
 
 const vacancyListInclude = {
-  source: { select: { id: true, name: true } },
+  source: { select: { id: true, name: true, kind: true } },
   vacancyProfiles: {
     select: {
       id: true,
@@ -42,7 +45,7 @@ const vacancyListInclude = {
 } satisfies Prisma.VacancyInclude;
 
 const detailInclude = {
-  source: { select: { id: true, name: true, baseUrl: true } },
+  source: { select: { id: true, name: true, baseUrl: true, kind: true } },
   vacancyProfiles: {
     include: { profile: { select: { id: true, name: true } } },
   },
@@ -55,7 +58,10 @@ type DetailRow = Prisma.VacancyGetPayload<{ include: typeof detailInclude }>;
 
 @Injectable()
 export class VacanciesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @InjectQueue(queueName(QUEUES.RESUME)) private readonly resumeQueue: Queue,
+  ) {}
 
   async list(query: VacancyListQuery) {
     const limit = Math.min(query.limit ?? 100, 200);
@@ -146,6 +152,78 @@ export class VacanciesService {
     await recomputeVacancyAggregate(this.prisma, id);
     return this.get(id, profileId);
   }
+
+  /**
+   * Genera la HV a pedido, sin importar el score: el pipeline solo la encola
+   * cuando el match supera `MATCH_MIN_SCORE`, y hay ofertas que interesan aunque
+   * el encaje sea bajo. Requiere el análisis previo (de él sale el ángulo de la HV).
+   */
+  async enqueueResume(id: string, profileId?: string) {
+    const target = await this.resolveProfileFor(id, profileId);
+
+    const match = await this.prisma.matchResult.findUnique({
+      where: { vacancyId_profileId: { vacancyId: id, profileId: target } },
+      select: { id: true },
+    });
+    if (!match) {
+      throw new BadRequestException(
+        'Todavía no hay análisis de encaje para esta vacante con ese perfil',
+      );
+    }
+
+    const vp = await this.prisma.vacancyProfile.findUnique({
+      where: { vacancyId_profileId: { vacancyId: id, profileId: target } },
+      select: { status: true },
+    });
+    if (
+      vp?.status === VacancyProfileStatus.APPLIED ||
+      vp?.status === VacancyProfileStatus.IGNORED
+    ) {
+      throw new BadRequestException('La vacante ya está marcada como aplicada o ignorada');
+    }
+
+    await this.resumeQueue.add(
+      'default',
+      { vacancyId: id, profileId: target },
+      {
+        jobId: `resume-${id}-${target}`,
+        attempts: 4,
+        backoff: { type: 'exponential' as const, delay: 3000 },
+        removeOnComplete: { age: 86400, count: 1000 },
+        removeOnFail: { age: 7 * 86400 },
+      },
+    );
+    return { ok: true, queued: true, profileId: target };
+  }
+
+  /** Perfil objetivo: el pedido (validado contra la vacante) o el único que la evaluó. */
+  private async resolveProfileFor(id: string, profileId?: string): Promise<string> {
+    const vacancy = await this.prisma.vacancy.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!vacancy) throw new NotFoundException(`Vacancy ${id} no existe`);
+
+    if (profileId) {
+      const vp = await this.prisma.vacancyProfile.findUnique({
+        where: { vacancyId_profileId: { vacancyId: id, profileId } },
+        select: { profileId: true },
+      });
+      if (!vp) throw new BadRequestException('Ese perfil no evaluó esta vacante');
+      return vp.profileId;
+    }
+
+    const rows = await this.prisma.vacancyProfile.findMany({
+      where: { vacancyId: id },
+      select: { profileId: true },
+    });
+    if (rows.length !== 1) {
+      throw new BadRequestException(
+        'Enviá profileId: hay varios perfiles (o ninguno) asociados a esta vacante',
+      );
+    }
+    return rows[0].profileId;
+  }
 }
 
 function mapListRow(v: ListRow, profileId?: string) {
@@ -164,6 +242,8 @@ function mapListRow(v: ListRow, profileId?: string) {
     : (v.drafts.find((d) => d.profileId === best?.profileId) ?? v.drafts[0] ?? null);
   return {
     ...v,
+    // Las ofertas pegadas a mano se marcan en la UI (fuente sintética MANUAL).
+    isManual: v.source.kind === 'MANUAL',
     matchScore: best?.score ?? v.matchScore,
     match: best,
     resume: bestDraft
@@ -211,6 +291,7 @@ function mapDetail(v: DetailRow, profileId?: string) {
     vacancyProfiles: undefined,
     matches: undefined,
     drafts: undefined,
+    isManual: v.source.kind === 'MANUAL',
     matchScore: bestMatch?.score ?? v.matchScore,
     match: bestMatch ? toPublicMatch(bestMatch) : null,
     resume: bestResume

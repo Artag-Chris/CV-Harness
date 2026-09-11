@@ -91,6 +91,9 @@ export class SourcesService {
 
   async list() {
     return this.prisma.source.findMany({
+      // La fuente sintética de las ofertas pegadas a mano no es un sitio: no se
+      // muestra ni se edita desde Fuentes (solo existe porque sourceId es NOT NULL).
+      where: { kind: { not: 'MANUAL' } },
       orderBy: { createdAt: 'asc' },
       include: {
         _count: { select: { vacancies: true } },

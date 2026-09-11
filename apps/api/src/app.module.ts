@@ -18,6 +18,7 @@ import { VacanciesModule } from './modules/vacancies/vacancies.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { CoverLetterModule } from './modules/cover-letter/cover-letter.module';
 import { ResumeEditModule } from './modules/resume-edit/resume-edit.module';
+import { ManualModule } from './modules/manual/manual.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { ResumeEditModule } from './modules/resume-edit/resume-edit.module';
     ProfilesModule,
     CoverLetterModule,
     ResumeEditModule,
+    ManualModule,
     HealthModule,
   ],
 })

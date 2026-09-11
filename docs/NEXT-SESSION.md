@@ -78,6 +78,38 @@
 - `PATCH /resumes/:id` ahora **también guarda la carta** si viene en el body
   (antes solo la preservaba): un solo Guardar persiste todo.
 
+## TAB "PEGAR OFERTA" — HV DESDE TEXTO PEGADO (2026-09-11, 3ª ronda)
+Para ofertas que no se pueden scrapear (LinkedIn, portales con login). Se pega el texto y entra
+al **mismo pipeline** (`normalize → match → resume`), así que reusa el editor tipo Canva, el
+pop-out y las descargas sin cambios.
+
+- **Sin migración**: `Vacancy.sourceId` es NOT NULL, así que hay una `Source` sintética
+  (`kind: 'MANUAL'`, `enabled: false`, `selectors: {}`) que el scheduler nunca despacha (solo
+  toma `enabled`) y que `GET /sources` oculta. Una sola fila, reutilizada.
+- **`POST /vacancies/from-text`** (`modules/manual`): crea o **reusa** la vacante y encola
+  NORMALIZE. Dedup: con URL por `sha256(url)` (igual que el scraping); sin URL por
+  `sha256('manual:' + texto)` (`fingerprintText`). El texto mínimo son 80 caracteres.
+- **Vacante dirigida**: se guarda `vacancy.profileId` y `NormalizeService.targetProfileIds`
+  devuelve **solo ese perfil** si está seteado. El scraping siempre crea `profileId: null`, así
+  que su fan-out no cambia.
+- **Carta automática**: la vacante manual viaja con `raw: { manual: true, autoCoverLetter: true }`
+  y `ResumeService` encadena `CoverLetterService.generate` al crear la HV, en `try/catch` (un
+  fallo de la carta no rompe la HV). El flujo scrapeado no cambia de costo.
+- **Umbral respetado**: si el match no llega a `MATCH_MIN_SCORE` (65), NO se genera HV. Para ese
+  caso hay una acción **explícita**: `POST /vacancies/:id/generate-resume?profileId=` encola la
+  etapa RESUME igual (exige que exista el `MatchResult` y que el perfil no haya aplicado/ignorado).
+  Está expuesta en la tab (tras un margen de gracia de 25 s, para no confundir "generándose" con
+  "no alcanzó") y en el detalle de vacante.
+- **UI**: tab `Pegar oferta` (`/cv/pegar`) con selector de perfil, textarea, datos opcionales
+  (puesto/empresa/URL) y polling cada 4 s que **se detiene al aparecer la HV** (si no, el panel se
+  remontaría y se perderían las ediciones sin guardar). Las pegadas se marcan con un chip
+  "Manual" en Vacantes y en el detalle.
+- **Tests**: +25 (`manual-intake`, `normalize-directed`, `resume-auto-letter`,
+  `vacancies-generate-resume`) → **93 en total**. Verificado además el grafo de DI con arranque en
+  seco (falla solo al conectar la BD, como corresponde sin Postgres).
+- **Ojo al buscar una pegada en Vacantes**: el listado por defecto filtra "Solo buen match ≥70",
+  así que una oferta manual con score menor aparece destildando ese filtro.
+
 ## PENDIENTES / PRÓXIMO
 1. ~~**Backfill al activar un CV**~~ **HECHO** (2026-09-11): `ProfileBackfillService`
    re-encola match por (vacante, perfil) de las vacantes ya guardadas sin
