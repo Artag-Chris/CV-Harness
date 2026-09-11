@@ -16,6 +16,7 @@ import { NotificationModule } from './modules/notification/notification.module';
 import { SourcesModule } from './modules/sources/sources.module';
 import { VacanciesModule } from './modules/vacancies/vacancies.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
+import { CoverLetterModule } from './modules/cover-letter/cover-letter.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { ProfilesModule } from './modules/profiles/profiles.module';
     SourcesModule,
     VacanciesModule,
     ProfilesModule,
+    CoverLetterModule,
     HealthModule,
   ],
 })

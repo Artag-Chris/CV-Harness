@@ -30,11 +30,23 @@ export class ResumeController {
       parsed,
       resume.profile?.name ?? 'CV',
     );
+    // La carta de presentación vive en el mismo JSON: se preserva tal cual, si
+    // no este PATCH (que solo re-renderiza el markdown) la borraría.
+    const previous = (resume.content ?? {}) as Record<string, unknown>;
+    const coverLetterFields = {
+      ...(typeof previous.coverLetter === 'string'
+        ? {
+            coverLetter: previous.coverLetter,
+            coverLetterSource: previous.coverLetterSource,
+            coverLetterUpdatedAt: previous.coverLetterUpdatedAt,
+          }
+        : {}),
+    };
 
     return this.prisma.resumeDraft.update({
       where: { id },
       data: {
-        content: { ...parsed, markdown } as Prisma.InputJsonValue,
+        content: { ...parsed, markdown, ...coverLetterFields } as Prisma.InputJsonValue,
         status: 'FINAL',
         version: { increment: 1 },
       },

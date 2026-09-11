@@ -216,6 +216,9 @@ function mapDetail(v: DetailRow, profileId?: string) {
     resume: bestResume
       ? {
           id: bestResume.id,
+          // Perfil dueño del borrador: el dashboard necesita saber de quién es
+          // la HV que está mostrando (contacto, QR, carta).
+          profileId: bestResume.profileId,
           version: bestResume.version,
           status: bestResume.status,
           content: bestResume.content,

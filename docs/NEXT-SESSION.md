@@ -29,6 +29,29 @@
     propia por perfil y agregados correctos en el listado.
 - Swagger `/api/docs` + DTOs y `schemaVersion` en streams (sesión anterior).
 
+## HV Y CARTA EN PDF (2026-09-11)
+- **Generación en el NAVEGADOR** (`@react-pdf/renderer`), no en el API: el mismo
+  motor sirve para la vista previa y para la descarga, y el PDF sale con texto
+  seleccionable (compatible con ATS). No hizo falta Chromium ni tocar Docker.
+- Plantilla calcada del CV original `Christian_resume.pdf`: banda de cabecera
+  `#413C40`, dos columnas, títulos en mayúscula con línea fina `#A3ABB8`, QR al
+  portafolio (`Profile.links` tipo `website`) y páginas extra para proyectos.
+  Fuentes descargadas del PDF original: Questrial (nombre/títulos), Raleway
+  (cuerpo, 400/700) y Roboto (contacto) — viven en `dashboard/public/fonts/`.
+- **Carta de presentación**: `POST /resumes/:id/cover-letter` la genera completa
+  con el LLM (o determinística si no hay proveedor); `PATCH` guarda la edición
+  manual. Se guarda DENTRO del `content` del `ResumeDraft` → sin migración.
+  Regla: `PATCH /resumes/:id` y la regeneración del pipeline **preservan** la
+  carta (antes el zod la descartaba al re-renderizar el markdown).
+- UI: panel en el detalle de vacante con pestañas HV/Carta, vista previa en vivo,
+  resumen editable y descarga de ambos PDF.
+- **Verificación sin navegador**: `npm run pdf:check` (en `dashboard/`) renderiza
+  ambos PDF con datos de ejemplo. Sirve para comprobar con poppler
+  (`pdffonts`) que **todas** las fuentes queden embebidas y que el texto sea
+  extraíble. Detectó y se corrigieron: solapamiento del titular con el contacto,
+  fuente **Helvetica no embebida** por un `\n` dentro de un `<Text>` (lo resuelve
+  `PdfText.tsx`) y caracteres sin glifo (los convierte `sanitize.ts`).
+
 ## PENDIENTES / PRÓXIMO
 1. ~~**Backfill al activar un CV**~~ **HECHO** (2026-09-11): `ProfileBackfillService`
    re-encola match por (vacante, perfil) de las vacantes ya guardadas sin
@@ -62,6 +85,9 @@
   (`set-state-in-effect` en `cv/layout.tsx`, detalle de vacante y `usePoll.ts`;
   `refs-during-render` en `usePoll.ts`). No se tocaron: son previos y el build de
   Next pasa igual.
+- `npm audit` del dashboard reporta vulnerabilidades en `next`, `postcss`,
+  `sharp` (preexistentes) y `nanoid` (llega con `@react-pdf/renderer`). No se
+  tocaron: subir `next` es un cambio aparte.
 
 ## Recordatorios de entorno
 - `npm install` SIEMPRE con `--include=dev` (NODE_ENV=production poda devDeps).

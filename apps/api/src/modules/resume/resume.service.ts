@@ -81,10 +81,26 @@ export class ResumeService {
 
     const markdown = renderResumeMarkdown(content, profile.name);
 
+    // Al regenerar la HV se conserva la carta de presentación ya escrita: vive
+    // en el mismo JSON y perderla obligaría a re-generarla (y a re-editarla).
+    const existingDraft = await this.prisma.resumeDraft.findUnique({
+      where: { vacancyId_profileId: { vacancyId, profileId } },
+      select: { content: true },
+    });
+    const previous = (existingDraft?.content ?? {}) as Record<string, unknown>;
+    const coverLetterFields =
+      typeof previous.coverLetter === 'string'
+        ? {
+            coverLetter: previous.coverLetter,
+            coverLetterSource: previous.coverLetterSource,
+            coverLetterUpdatedAt: previous.coverLetterUpdatedAt,
+          }
+        : {};
+
     const resume = await this.prisma.resumeDraft.upsert({
       where: { vacancyId_profileId: { vacancyId, profileId } },
       update: {
-        content: { ...content, markdown } as Prisma.InputJsonValue,
+        content: { ...content, markdown, ...coverLetterFields } as Prisma.InputJsonValue,
         version: { increment: 1 },
       },
       create: {
