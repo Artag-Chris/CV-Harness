@@ -4,6 +4,7 @@ import { VacancyStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { JsonLogger } from '../../common/json-logger.service';
 import { PrismaService } from '../../common/prisma.service';
+import { TECH_DICTIONARY } from '../../common/tech-dictionary';
 import { cleanDescription } from '../../common/text.util';
 import { queueName, QUEUES } from '../../config/queue.config';
 import { LLM_PROVIDER } from '../../config/tokens';
@@ -27,17 +28,6 @@ const SYSTEM_PROMPT = `Eres un parser experto de ofertas de empleo. A partir del
   "skills": ["habilidad técnica", ... máx 15]
 }
 No inventes requisitos que no estén en el texto. No agregues markdown ni texto fuera del JSON.`;
-
-const TECH_DICTIONARY = [
-  'typescript', 'javascript', 'node', 'nest', 'nestjs', 'express', 'react', 'next', 'nextjs',
-  'vue', 'angular', 'rust', 'python', 'go', 'java', 'php', 'c#', '.net', 'c++',
-  'postgres', 'postgresql', 'mysql', 'mongodb', 'sqlite', 'redis', 'prisma', 'typeorm',
-  'docker', 'kubernetes', 'k8s', 'aws', 'gcp', 'azure', 'nginx', 'terraform',
-  'rabbitmq', 'kafka', 'bullmq', 'nats', 'websocket', 'graphql', 'rest', 'grpc',
-  'llm', 'openai', 'anthropic', 'claude', 'groq', 'langchain', 'rag', 'pgvector',
-  'puppeteer', 'playwright', 'scrapy', 'jwt', 'oauth', 'ci/cd', 'github actions', 'gitlab',
-  'vitest', 'jest', 'cypress', 'tailwind', 'flutter', 'react native', 'linux', 'bash',
-];
 
 /**
  * Etapa "normalizar": filtra la información más importante y detallada de la

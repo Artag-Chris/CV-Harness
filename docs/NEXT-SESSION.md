@@ -110,6 +110,57 @@ pop-out y las descargas sin cambios.
 - **Ojo al buscar una pegada en Vacantes**: el listado por defecto filtra "Solo buen match ≥70",
   así que una oferta manual con score menor aparece destildando ese filtro.
 
+## MEDIDOR DE ATS + MODO ATS (2026-09-11, 4ª ronda)
+
+**El bug más importante que apareció (y que no se veía a ojo)**: los títulos de sección
+llevaban `letterSpacing: 1.7`, y el extractor de texto metía espacios DENTRO de la palabra:
+`PROYECTOS` salía como `P R OY EC TO S` y `ACADEMIC BACKGROUND` troceado. Un ATS dejaba de
+reconocer esas secciones. Se quitó el tracking de los títulos (afectaba a los DOS modos) y se
+agregó un guardián para que no vuelva a pasar en silencio.
+
+- **`npm run ats:verify -- <dir>`** (`dashboard/scripts/ats-verify.mjs`): extrae el texto de los
+  PDF con `pdftotext` y comprueba que los 7 encabezados estándar del modo ATS salgan completos y
+  **en orden lineal**, que ningún encabezado salga troceado, que el modo heredado conserve los
+  suyos, y que el contacto sea reconocible por regex (email en minúsculas, sin `CEL:`).
+  Si no hay poppler avisa y no rompe. **Probado contra la regresión real**: con el tracking
+  puesto reporta 3 fallos; sin él, `ATS_OK`.
+
+### API — medidor determinístico (`modules/ats`)
+Sin IA y sin migración: es un cálculo reproducible y explicable (un ATS no negocia).
+- `normalize.ts`: minúsculas, sin acentos, y conserva los caracteres significativos de
+  tecnología (`.` de `node.js`, `/` de `ci/cd`, `+` de `c++`, `#` de `c#`). `significantTokens`
+  descarta palabras vacías **y genéricas de requisito** (`experiencia`, `conocimiento`, `basic`…):
+  si no, cualquier HV "cubriría" cualquier requisito. `ingles`/`english` NO son genéricas: son un
+  requisito duro frecuente.
+- `synonyms.ts`: alias explícitos (node≡nodejs, postgres≡postgresql, algorithms≡algoritmos…).
+- `keywords.ts`: modo **estricto** — además del `enrichment` y del `applicationStrategy`, escanea
+  el `descriptionRaw` con el `TECH_DICTIONARY` (ahora compartido en `common/tech-dictionary.ts`
+  con el normalizador). Cobertura por frase con alias + tokens significativos + **parejas
+  adyacentes compactadas**, para que `fullstack` encuentre "Full Stack".
+- `analyzer.ts`: score 0-100 con 4 bloques — **keywords 45%**, estructura 20%, contacto 15%,
+  formato 20%. `grade`: PASS ≥80 · RISK 60-79 · FAIL <60. La estructura separa secciones
+  **núcleo** (summary/experience/skills/education) de las opcionales, para que una HV casi vacía
+  no saque buena nota.
+- **`content.atsMode` decide qué encabezados se esperan**: los encabezados viven en la plantilla
+  PDF, no en el contenido, así que el medidor tiene que saber en qué modo se va a exportar.
+- Endpoints: `POST /resumes/:id/ats` (acepta `content` sin guardar) y
+  `POST /resumes/:id/ats/keywords` (propone integración con IA **sin guardar**: se revisa en la
+  vista previa y se guarda a mano).
+
+### Dashboard
+- **Interruptor "Modo ATS"** en la pestaña ATS: una columna, encabezados estándar (en el idioma
+  del contenido) y contacto limpio. Se guarda con el borrador (`content.atsMode`).
+- **`AtsPanel`**: score con semáforo, las 4 barras, chips de keywords faltantes, qué puede leer
+  mal, qué hacer, y "Ver el texto que lee el ATS" (para que el score no sea una caja negra).
+- **Pestaña ATS en la tarjeta** de HV/Carta + badge `ATS <score>` en el encabezado. El pop-out
+  sigue siendo CV/Carta.
+- Los encabezados estándar están **duplicados a propósito** en la API y en el PDF (repos
+  separados): `apps/api/src/modules/ats/headings.ts` y `dashboard/src/lib/pdf/headings.ts`.
+
+**Tests**: +18 (`ats-normalize`, `ats-analyzer`, `ats-keywords-fix`) → **123 en total**. Fijan el
+contrato, incluido que **el mismo contenido puntúe mejor en modo ATS** y que no se inventen
+faltantes.
+
 ## PENDIENTES / PRÓXIMO
 1. ~~**Backfill al activar un CV**~~ **HECHO** (2026-09-11): `ProfileBackfillService`
    re-encola match por (vacante, perfil) de las vacantes ya guardadas sin
