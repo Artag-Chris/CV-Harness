@@ -22,6 +22,7 @@ export class VacanciesController {
   list(
     @Query('status') status?: string,
     @Query('sourceId') sourceId?: string,
+    @Query('profileId') profileId?: string,
     @Query('q') q?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
@@ -31,6 +32,7 @@ export class VacanciesController {
     return this.vacancies.list({
       status: (status as VacancyStatus) || 'ALL',
       sourceId,
+      profileId,
       q,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
@@ -39,8 +41,8 @@ export class VacanciesController {
   }
 
   @Get(':id')
-  get(@Param('id') id: string) {
-    return this.vacancies.get(id);
+  get(@Param('id') id: string, @Query('profileId') profileId?: string) {
+    return this.vacancies.get(id, profileId);
   }
 
   @Post(':id/status')

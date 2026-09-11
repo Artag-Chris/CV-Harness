@@ -4,33 +4,137 @@ import {
   Controller,
   Delete,
   Get,
+  NotFoundException,
   Param,
   Patch,
   Post,
   Put,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { ProfileScheduleDto } from '../../common/api-dto';
 import { PrismaService } from '../../common/prisma.service';
 import { DispatchService } from '../scheduler/dispatch.service';
+import { ProfileBackfillService } from './profile-backfill.service';
+
+/** Campos editables de un perfil desde el dashboard. */
+interface UpdateProfileBody {
+  name?: string;
+  headline?: string[];
+  summary?: string;
+  email?: string | null;
+  isPrimary?: boolean;
+}
 
 @Controller('profiles')
 export class ProfilesController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly dispatch: DispatchService,
+    private readonly backfill: ProfileBackfillService,
   ) {}
 
   @Post()
   async create(@Body() body: { name?: string; headline?: string[]; summary?: string; email?: string }) {
     if (!body.name?.trim()) throw new BadRequestException('name es requerido');
+    const name = body.name.trim();
+    // El primer perfil nace primario: sin primario, las fuentes que nadie
+    // tilda no tendrían a quién asignarse en el fan-out del match.
+    const isFirst = (await this.prisma.profile.count()) === 0;
     return this.prisma.profile.create({
       data: {
-        name: body.name.trim(),
-        headline: body.headline ?? [body.name.trim()],
+        name,
+        headline: body.headline ?? [name],
         summary: body.summary ?? '',
         email: body.email ?? null,
+        isPrimary: isFirst,
       },
     });
+  }
+
+  /** Edita los datos del perfil (y opcionalmente lo marca como primario). */
+  @Patch(':id')
+  async update(@Param('id') id: string, @Body() body: UpdateProfileBody) {
+    const profile = await this.prisma.profile.findUnique({ where: { id } });
+    if (!profile) throw new NotFoundException(`Profile ${id} no existe`);
+
+    const data: Prisma.ProfileUpdateInput = {};
+    if (body.name !== undefined) {
+      if (!body.name.trim()) throw new BadRequestException('name no puede quedar vacío');
+      data.name = body.name.trim();
+    }
+    if (body.headline !== undefined) data.headline = body.headline;
+    if (body.summary !== undefined) data.summary = body.summary;
+    if (body.email !== undefined) data.email = body.email?.trim() || null;
+
+    if (body.isPrimary === true) {
+      // Solo un primario: se degrada el resto en la misma transacción.
+      const [, updated] = await this.prisma.$transaction([
+        this.prisma.profile.updateMany({
+          where: { id: { not: id }, isPrimary: true },
+          data: { isPrimary: false },
+        }),
+        this.prisma.profile.update({ where: { id }, data: { ...data, isPrimary: true } }),
+      ]);
+      return updated;
+    }
+    if (Object.keys(data).length === 0) return profile;
+    return this.prisma.profile.update({ where: { id }, data });
+  }
+
+  /**
+   * Borra el perfil y todo lo suyo (HV, chunks, matches, borradores y sus
+   * selecciones de fuentes). Las vacantes NO se borran: son del catálogo.
+   */
+  @Delete(':id')
+  async remove(@Param('id') id: string) {
+    const profile = await this.prisma.profile.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { resumes: true, matches: true, sources: true } },
+      },
+    });
+    if (!profile) throw new NotFoundException(`Profile ${id} no existe`);
+
+    const total = await this.prisma.profile.count();
+    if (total <= 1) {
+      throw new BadRequestException(
+        'Es el único perfil: creá otro antes de borrarlo (el sistema necesita al menos uno)',
+      );
+    }
+
+    // Si era el primario, se promueve otro para no dejar el sistema sin primario.
+    if (profile.isPrimary) {
+      const heir = await this.prisma.profile.findFirst({
+        where: { id: { not: id } },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (heir) {
+        await this.prisma.profile.update({
+          where: { id: heir.id },
+          data: { isPrimary: true },
+        });
+      }
+    }
+
+    await this.prisma.profile.delete({ where: { id } });
+    return {
+      ok: true,
+      deleted: {
+        resumes: profile._count.resumes,
+        matches: profile._count.matches,
+        sources: profile._count.sources,
+      },
+    };
+  }
+
+  /** Re-evalúa las vacantes ya guardadas contra este perfil (backfill). */
+  @Post(':id/backfill')
+  async runBackfill(@Param('id') id: string) {
+    const profile = await this.prisma.profile.findUnique({ where: { id } });
+    if (!profile) throw new NotFoundException(`Profile ${id} no existe`);
+    const result = await this.backfill.enqueueForProfile(id);
+    return { ok: true, ...result };
   }
 
   /** Reemplaza los sitios guardados que vigila el perfil. */
@@ -55,6 +159,8 @@ export class ProfilesController {
         data: ids.map((sourceId) => ({ profileId: id, sourceId })),
       }),
     ]);
+    // Las vacantes ya guardadas de esos sitios se evalúan enseguida.
+    await this.backfill.enqueueForProfile(id);
     return this.get(id);
   }
 
@@ -65,11 +171,14 @@ export class ProfilesController {
     @Param('sourceId') sourceId: string,
     @Body() body: { enabled?: boolean },
   ) {
-    return this.prisma.profileSource.upsert({
+    const selection = await this.prisma.profileSource.upsert({
       where: { profileId_sourceId: { profileId, sourceId } },
       update: { enabled: body.enabled ?? true },
       create: { profileId, sourceId, enabled: body.enabled ?? true },
     });
+    // Al tildar un sitio, las vacantes viejas de ese sitio se evalúan ya.
+    if (selection.enabled) await this.backfill.enqueueForProfile(profileId);
+    return selection;
   }
 
   /** Quita el sitio de la selección del perfil. */
@@ -111,8 +220,8 @@ export class ProfilesController {
   }
 
   @Get(':id')
-  get(@Param('id') id: string) {
-    return this.prisma.profile.findUnique({
+  async get(@Param('id') id: string) {
+    const profile = await this.prisma.profile.findUnique({
       where: { id },
       include: {
         links: true,
@@ -136,6 +245,8 @@ export class ProfilesController {
         },
       },
     });
+    if (!profile) throw new NotFoundException(`Profile ${id} no existe`);
+    return profile;
   }
 
   /** Cadencia del cron del perfil: cada cuántos minutos corre SUS fuentes. */

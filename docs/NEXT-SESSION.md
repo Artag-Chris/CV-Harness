@@ -30,20 +30,38 @@
 - Swagger `/api/docs` + DTOs y `schemaVersion` en streams (sesión anterior).
 
 ## PENDIENTES / PRÓXIMO
-1. **Backfill al activar un CV**: hoy activar CV no re-matchea vacantes viejas
-   del perfil (el E2E usó vacantes nuevas). Hacer: al activar, encolar match de
-   ese perfil por cada vacante NORMALIZED+ de sus sitios sin `VacancyProfile`
-   del perfil (jobId único `match-{vacancy}-{profile}`, patrón ya usado en
-   `normalize.service.ts`).
+1. ~~**Backfill al activar un CV**~~ **HECHO** (2026-09-11): `ProfileBackfillService`
+   re-encola match por (vacante, perfil) de las vacantes ya guardadas sin
+   `VacancyProfile` de ese perfil. Se dispara al tildar un sitio
+   (`PATCH/PUT /profiles/:id/sources`), al activar una HV ya indexada
+   (`POST /resumes/:id/activate`) y al terminar de indexarla
+   (`resume-index.worker`). Manual: `POST /profiles/:id/backfill`. Tope de 200
+   por corrida (cada match es una llamada de IA) y reporta `remaining`.
 2. Cadencia por sitio: usar `ProfileSource.intervalMinutes` en el dispatch
    (campo ya existe; hoy manda `Profile.scheduleMinutes`) + UI opcional.
 3. En el server: copiar `JWT_SECRET` de atiende al `.env` del harness y subir
    `FIXTURE_ENABLED=false`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `ADMIN_PASSWORD`.
-4. Detalle de vacante (UI): mostrar el bloque `profiles[]` (ya viaja en la API)
-   con sus estados/acciones por perfil; actualizar `cv-types.ts`.
+4. ~~Detalle de vacante (UI): mostrar el bloque `profiles[]`~~ **HECHO**
+   (2026-09-11): el detalle tiene selector de perfil, muestra SU match/HV/estado
+   y el listado filtra por perfil (`GET /vacancies?profileId=`, también en
+   `GET /vacancies/:id?profileId=`). El estado aplicada/ignorada ya viaja con
+   `profileId` (antes con varios perfiles el API devolvía 404 al marcarla).
 5. Roadmap largo (auditoría): DLQ, feature flags `FEATURE_*`, router LLM con
    fallback + presupuesto, notificación Email/Telegram, fuentes RSS/JSON/LinkedIn,
    tests de pipeline, graceful shutdown del scraper.
+6. **Aislamiento por usuario (NO implementado, solo diseñado)**: ver
+   `docs/adr-002-aislamiento-por-usuario.md`. Hoy varios perfiles conviven y todos
+   los ve quien entre al dashboard; el plan es asociar `Profile.ownerId` al `sub`
+   del JWT de atiende para que cada persona vea solo lo suyo. La ADR trae las 4
+   fases, la migración aditiva, los snippets y las decisiones abiertas (la
+   principal: si `Source` sigue siendo catálogo compartido). No arrancar sin OK
+   explícito: la fase 3 es la que rompe.
+
+## Deuda conocida (preexistente, no bloquea)
+- ESLint del dashboard tiene 4 errores de las reglas nuevas de React
+  (`set-state-in-effect` en `cv/layout.tsx`, detalle de vacante y `usePoll.ts`;
+  `refs-during-render` en `usePoll.ts`). No se tocaron: son previos y el build de
+  Next pasa igual.
 
 ## Recordatorios de entorno
 - `npm install` SIEMPRE con `--include=dev` (NODE_ENV=production poda devDeps).

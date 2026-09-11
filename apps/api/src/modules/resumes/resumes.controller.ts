@@ -13,8 +13,10 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { ResumeStatus } from '@prisma/client';
 import { ActivateResumeDto, ResumeTextDto } from '../../common/api-dto';
 import { queueName, QUEUES } from '../../config/queue.config';
+import { ProfileBackfillService } from '../profiles/profile-backfill.service';
 import { ResumesService } from './resumes.service';
 
 /**
@@ -27,6 +29,7 @@ export class ResumesController {
     private readonly resumes: ResumesService,
     @InjectQueue(queueName(QUEUES.RESUME_INDEX))
     private readonly indexQueue: Queue,
+    private readonly backfill: ProfileBackfillService,
   ) {}
 
   @Get()
@@ -75,7 +78,12 @@ export class ResumesController {
   @Post(':id/activate')
   async activate(@Param('id') id: string, @Body() body: ActivateResumeDto) {
     const resume = await this.resumes.activate(id, body.profileId);
-    // El backfill de re-match se encola al activar (lo resuelve el pipeline N:M).
+    // Si la HV ya estaba indexada, hay embeddings y se puede re-evaluar las
+    // vacantes viejas al instante. Si aún se está indexando, lo hace el worker
+    // (`resume-index.worker`) al terminar: es el único punto con vectores listos.
+    if (resume.status === ResumeStatus.READY) {
+      await this.backfill.enqueueForProfile(resume.profileId);
+    }
     return resume;
   }
 
