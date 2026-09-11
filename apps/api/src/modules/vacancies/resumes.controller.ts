@@ -24,24 +24,31 @@ export class ResumeController {
     });
     if (!resume) throw new NotFoundException(`Resume ${id} no existe`);
 
-    const { markdown: _ignored, ...content } = input.content;
-    const parsed = ResumeContentSchema.parse(content);
+    const { markdown: _ignored, ...rest } = input.content;
+    const parsed = ResumeContentSchema.parse(rest);
     const markdown = renderResumeMarkdown(
       parsed,
       resume.profile?.name ?? 'CV',
     );
-    // La carta de presentación vive en el mismo JSON: se preserva tal cual, si
-    // no este PATCH (que solo re-renderiza el markdown) la borraría.
+    // La carta de presentación vive en el mismo JSON del borrador. Si viene en
+    // el body se guarda como editada a mano; si no, se conserva la que había
+    // (este PATCH solo re-renderiza el markdown y antes la borraba).
+    const editedLetter =
+      typeof rest.coverLetter === 'string' ? rest.coverLetter.trim() : null;
     const previous = (resume.content ?? {}) as Record<string, unknown>;
-    const coverLetterFields = {
-      ...(typeof previous.coverLetter === 'string'
+    const coverLetterFields = editedLetter
+      ? {
+          coverLetter: editedLetter,
+          coverLetterSource: 'editada',
+          coverLetterUpdatedAt: new Date().toISOString(),
+        }
+      : typeof previous.coverLetter === 'string'
         ? {
             coverLetter: previous.coverLetter,
             coverLetterSource: previous.coverLetterSource,
             coverLetterUpdatedAt: previous.coverLetterUpdatedAt,
           }
-        : {}),
-    };
+        : {};
 
     return this.prisma.resumeDraft.update({
       where: { id },

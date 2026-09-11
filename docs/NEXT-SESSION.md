@@ -52,6 +52,32 @@
   fuente **Helvetica no embebida** por un `\n` dentro de un `<Text>` (lo resuelve
   `PdfText.tsx`) y caracteres sin glifo (los convierte `sanitize.ts`).
 
+## MAQUETACIÓN CORREGIDA + EDICIÓN TIPO CANVA (2026-09-11, 2ª ronda)
+- **Solapamiento de texto (bug real)**: el cuerpo se desbordaba sobre la columna
+  derecha. Causa: `textAlign: 'justify'` en react-pdf + columnas con `flexGrow`.
+  El CV original va alineado a la izquierda, así que se quitó `justify` y las
+  columnas pasaron a anchos explícitos (`62%` / `38%`).
+- **Espacio en blanco (bug real, medido)**: la columna derecha terminaba en
+  y=380 y la izquierda en y=791 → 411pt vacíos. Ahora la columna izquierda lleva
+  perfil + experiencia + skills, y la derecha formación + idiomas + soft skills +
+  QR: quedan **788 vs 776**. Además se pasó de 2 páginas fijas a **una sola en
+  flujo continuo** (react-pdf pagina solo), con pie fijo y numeración; la página
+  de continuación ya no arranca pegada al borde (padding de página + margen
+  negativo en la banda oscura).
+- **Cómo verificarlo sin abrir el navegador**: `pdftotext -bbox` da la caja de
+  cada palabra; con eso se detectan solapamientos (intersección en X e Y) y se
+  mide el balance de columnas. Cero solapamientos es el criterio de aceptación.
+- **Edición tipo Canva**: `ResumeEditor` permite editar titular, resumen, y
+  agregar/quitar/reordenar experiencia (con sus viñetas), proyectos, skills,
+  soft skills y formación. Vista previa **en pop-out** (`PdfPreviewModal`) con el
+  editor a la izquierda y el PDF en vivo a la derecha, antes de guardar.
+- **La IA organiza el boceto**: `POST /resumes/:id/refine { instruction }`
+  (`modules/resume-edit`). Reordena/acorta/reescribe el JSON completo respetando
+  los hechos del perfil, re-renderiza el markdown y conserva la carta. Sin
+  proveedor LLM devuelve `applied:false` con un aviso (no rompe).
+- `PATCH /resumes/:id` ahora **también guarda la carta** si viene en el body
+  (antes solo la preservaba): un solo Guardar persiste todo.
+
 ## PENDIENTES / PRÓXIMO
 1. ~~**Backfill al activar un CV**~~ **HECHO** (2026-09-11): `ProfileBackfillService`
    re-encola match por (vacante, perfil) de las vacantes ya guardadas sin
@@ -88,6 +114,9 @@
 - `npm audit` del dashboard reporta vulnerabilidades en `next`, `postcss`,
   `sharp` (preexistentes) y `nanoid` (llega con `@react-pdf/renderer`). No se
   tocaron: subir `next` es un cambio aparte.
+- La **última página** del CV puede quedar con espacio libre si el contenido no
+  la llena: es propio de la cantidad de contenido, no un bug de maquetación. La
+  página 1 se llena hasta el pie y lo que sobra fluye a la siguiente.
 
 ## Recordatorios de entorno
 - `npm install` SIEMPRE con `--include=dev` (NODE_ENV=production poda devDeps).
