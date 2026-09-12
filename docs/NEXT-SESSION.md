@@ -3,6 +3,26 @@
 > Estado: 2026-09-12. Proyecto **cv-harness** + pestaña **CV Harness** en el
 > front `dashboard/` (hermano de atiende).
 
+## SELECTOR DE IDIOMA (PERFIL + POR HV) (2026-09-12, 3ª parte)
+- **Modelo**: `Profile.applyLanguage String @default("auto")` (migración
+  `20260912010000_profile_apply_language`) y `content.language` por borrador
+  (override por HV, sin migración). Valores: `auto` (idioma de la vacante) | `es` | `en`.
+- **Helper** `common/apply-language.ts`: `resolveApplyLanguage(draft, profile)`
+  (override → perfil → auto) y `languageInstruction()` para los prompts.
+- **Generación**: `resume.service` pide al LLM el idioma resuelto y guarda
+  `content.language`; `cover-letter.service` usa el mismo idioma. Sin LLM el
+  respaldo determinístico queda en `auto` (el texto es español, así que los
+  encabezados no mienten).
+- **Traducción preservando ediciones**: `POST /resumes/:id/translate { language }`
+  (`resume-edit`): traduce el JSON completo + la carta, conserva `atsMode` y
+  guarda `language`. NO re-redacta desde el perfil (respetá las ediciones).
+- **ATS + PDF**: el medidor (`ats/analyzer`) y los encabezados del PDF usan
+  `content.language` cuando es `es`/`en`; con `auto` detectan del contenido.
+- **UI**: selector en Perfiles & CV (idioma de postulación) y en el panel de HV
+  («Idioma de esta HV» con Traducir y aplicar / Guardar).
+- **Tests**: +12 (`apply-language`, `ats-language`, `translate`) → **159**.
+  `vitest`, `nest build` y `tsc --noEmit` del dashboard verdes.
+
 ## HV POTENCIADA + IMPORT MD→PERFIL CON IA (2026-09-12, 2ª parte)
 - **HV reescrita** (`Christian_Henao_AI_Engineer_CV.md`): atiende y CV Harness como
   productos **EN PRODUCCIÓN**, Finova cerrada en **Ago 2026** (ya no "Presente"),

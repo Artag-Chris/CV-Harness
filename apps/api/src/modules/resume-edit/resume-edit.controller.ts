@@ -17,4 +17,16 @@ export class ResumeEditController {
     }
     return this.edits.refine(id, body.instruction);
   }
+
+  /**
+   * Traduce el borrador conservando las ediciones (no re-redacta desde el
+   * perfil). `language` es 'es' o 'en'; para volver a "auto" se usa el PATCH.
+   */
+  @Post(':id/translate')
+  translate(@Param('id') id: string, @Body() body: { language?: string }) {
+    if (body.language !== 'es' && body.language !== 'en') {
+      throw new BadRequestException('language debe ser "es" o "en"');
+    }
+    return this.edits.translate(id, body.language);
+  }
 }

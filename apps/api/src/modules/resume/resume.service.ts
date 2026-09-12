@@ -4,6 +4,11 @@ import { Prisma, VacancyProfileStatus, VacancyStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { JsonLogger } from '../../common/json-logger.service';
 import { PrismaService } from '../../common/prisma.service';
+import {
+  type ApplyLanguage,
+  languageInstruction,
+  resolveApplyLanguage,
+} from '../../common/apply-language';
 import { queueName, QUEUES } from '../../config/queue.config';
 import { LLM_PROVIDER } from '../../config/tokens';
 import { CoverLetterService } from '../cover-letter/cover-letter.service';
@@ -30,7 +35,12 @@ Devuelve ÚNICAMENTE JSON con esta forma exacta:
   "keywords": ["palabra clave", ... máx 8]
 }
 
-Reglas: los bullets de experiencia y proyectos deben reescribirse para resaltar lo relevante a la vacante, pero conservando exactamente los hechos del perfil. Prohibido agregar empresas, títulos, certificaciones o métricas que no estén en el perfil. Responde en español salvo que la vacante esté en otro idioma.`;
+Reglas: los bullets de experiencia y proyectos deben reescribirse para resaltar lo relevante a la vacante, pero conservando exactamente los hechos del perfil. Prohibido agregar empresas, títulos, certificaciones o métricas que no estén en el perfil.`;
+
+/** El idioma de salida se decide por perfil/borrador, no por el prompt fijo. */
+function buildSystemPrompt(language: ApplyLanguage): string {
+  return `${SYSTEM_PROMPT}\n\nIdioma de salida: ${languageInstruction(language)}`;
+}
 
 /**
  * Etapa "resume" N:M: genera el borrador de HV para (vacante, perfil).
@@ -72,24 +82,28 @@ export class ResumeService {
     });
     if (!match) return;
 
-    const profileSnapshot = await buildProfileSnapshot(this.prisma, profileId);
-    const ai = await this.llm.json(
-      SYSTEM_PROMPT,
-      this.buildUserPrompt(vacancy, match, profileSnapshot),
-    );
-    const content: ResumeContent = ai
-      ? ResumeContentSchema.parse(ai)
-      : await this.deterministicContent(vacancy, profileId, match);
-
-    const markdown = renderResumeMarkdown(content, profile.name);
-
-    // Al regenerar la HV se conserva la carta de presentación ya escrita: vive
-    // en el mismo JSON y perderla obligaría a re-generarla (y a re-editarla).
+    // Idioma: override del borrador (por HV) → default del perfil → auto.
+    // Se lee ANTES de generar para pedirle al LLM el idioma correcto.
     const existingDraft = await this.prisma.resumeDraft.findUnique({
       where: { vacancyId_profileId: { vacancyId, profileId } },
       select: { content: true },
     });
     const previous = (existingDraft?.content ?? {}) as Record<string, unknown>;
+    const requestedLanguage = resolveApplyLanguage(previous.language, profile.applyLanguage);
+
+    const profileSnapshot = await buildProfileSnapshot(this.prisma, profileId);
+    const ai = await this.llm.json(
+      buildSystemPrompt(requestedLanguage),
+      this.buildUserPrompt(vacancy, match, profileSnapshot),
+    );
+    const content: ResumeContent = ai
+      ? ResumeContentSchema.parse(ai)
+      : await this.deterministicContent(vacancy, profileId, match);
+    // Sin LLM el respaldo determinístico es en español: no se declara un idioma
+    // forzado para que los encabezados del PDF sigan al contenido real.
+    const language: ApplyLanguage = ai ? requestedLanguage : 'auto';
+
+    const markdown = renderResumeMarkdown(content, profile.name);
     const coverLetterFields =
       typeof previous.coverLetter === 'string'
         ? {
@@ -102,13 +116,13 @@ export class ResumeService {
     const resume = await this.prisma.resumeDraft.upsert({
       where: { vacancyId_profileId: { vacancyId, profileId } },
       update: {
-        content: { ...content, markdown, ...coverLetterFields } as Prisma.InputJsonValue,
+        content: { ...content, markdown, language, ...coverLetterFields } as Prisma.InputJsonValue,
         version: { increment: 1 },
       },
       create: {
         vacancyId,
         profileId,
-        content: { ...content, markdown } as Prisma.InputJsonValue,
+        content: { ...content, markdown, language } as Prisma.InputJsonValue,
       },
     });
 

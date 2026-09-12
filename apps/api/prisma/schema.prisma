@@ -28,6 +28,8 @@ model Profile {
   // Cron por perfil: cada cuántos minutos se corre la búsqueda de SUS fuentes.
   scheduleMinutes Int?
   nextRunAt       DateTime?
+  // Idioma de postulación por defecto de sus HV: auto (idioma de la vacante) | es | en.
+  applyLanguage   String   @default("auto")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -7,6 +7,10 @@ import {
 import { Prisma } from '@prisma/client';
 import { JsonLogger } from '../../common/json-logger.service';
 import { PrismaService } from '../../common/prisma.service';
+import {
+  languageInstruction,
+  resolveApplyLanguage,
+} from '../../common/apply-language';
 import { LLM_PROVIDER } from '../../config/tokens';
 import { LlmProvider } from '../llm/llm-provider.port';
 import { buildProfileSnapshot } from '../profiles/profile-snapshot';
@@ -22,8 +26,7 @@ Reglas:
 - Usa EXCLUSIVAMENTE hechos del perfil: experiencia, proyectos, skills, idiomas. Prohibido inventar empresas, títulos, métricas o certificaciones.
 - Menciona el rol y 1-2 requisitos concretos de la vacante y conéctalos con logros reales del perfil.
 - Separa los párrafos con una línea vacía. No uses markdown, viñetas, negritas ni títulos.
-- Extensión: 250-350 palabras.
-- Escribe en el mismo idioma de la vacante.`;
+- Extensión: 250-350 palabras.`;
 
 /** Datos que quedan guardados junto a la carta (para mostrarla/editar sin re-generar). */
 interface StoredCoverLetter {
@@ -63,8 +66,13 @@ export class CoverLetterService {
       buildProfileSnapshot(this.prisma, draft.profileId),
     ]);
 
+    // El idioma de la carta sigue el del borrador/perfil (auto = idioma de la vacante).
+    const language = resolveApplyLanguage(
+      (draft.content as Record<string, unknown> | null)?.language,
+      draft.profile.applyLanguage,
+    );
     const ai = await this.llm.json(
-      SYSTEM_PROMPT,
+      `${SYSTEM_PROMPT}\n\nIdioma de salida: ${languageInstruction(language)}`,
       this.buildUserPrompt(draft.vacancy, match, profileSnapshot),
     );
     const aiLetter =

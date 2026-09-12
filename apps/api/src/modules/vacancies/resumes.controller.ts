@@ -1,6 +1,7 @@
 import { Body, Controller, NotFoundException, Param, Patch } from '@nestjs/common';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
+import { normalizeApplyLanguage } from '../../common/apply-language';
 import { PrismaService } from '../../common/prisma.service';
 import { ResumeContentSchema } from '../pipeline/pipeline.types';
 import { renderResumeMarkdown } from '../resume/resume-markdown';
@@ -26,6 +27,9 @@ export class ResumeController {
 
     const { markdown: _ignored, ...rest } = input.content;
     const parsed = ResumeContentSchema.parse(rest);
+    // El idioma (auto|es|en) no es contenido redactado: zod lo descartaría, así
+    // que se rescata aparte para que el selector por HV pueda persistirlo.
+    const language = normalizeApplyLanguage(rest.language);
     const markdown = renderResumeMarkdown(
       parsed,
       resume.profile?.name ?? 'CV',
@@ -53,7 +57,12 @@ export class ResumeController {
     return this.prisma.resumeDraft.update({
       where: { id },
       data: {
-        content: { ...parsed, markdown, ...coverLetterFields } as Prisma.InputJsonValue,
+        content: {
+          ...parsed,
+          markdown,
+          ...(language ? { language } : {}),
+          ...coverLetterFields,
+        } as Prisma.InputJsonValue,
         status: 'FINAL',
         version: { increment: 1 },
       },

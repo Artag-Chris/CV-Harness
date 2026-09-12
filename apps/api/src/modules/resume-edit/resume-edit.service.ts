@@ -5,6 +5,7 @@ import { PrismaService } from '../../common/prisma.service';
 import { LLM_PROVIDER } from '../../config/tokens';
 import { LlmProvider } from '../llm/llm-provider.port';
 import { ResumeContent, ResumeContentSchema } from '../pipeline/pipeline.types';
+import { normalizeParagraphs } from '../cover-letter/cover-letter.service';
 import { buildProfileSnapshot } from '../profiles/profile-snapshot';
 import { renderResumeMarkdown } from '../resume/resume-markdown';
 
@@ -40,6 +41,35 @@ export interface RefineResult {
   applied: boolean;
   note: string;
 }
+
+/** Idiomas a los que se puede traducir (auto no aplica: no es un idioma). */
+export type TargetLanguage = 'es' | 'en';
+
+export interface TranslateResult {
+  content: ResumeContent & { markdown?: string; coverLetter?: string; language?: string };
+  applied: boolean;
+  language: TargetLanguage;
+  note: string;
+}
+
+const TRANSLATE_PROMPT = `Eres un traductor experto de hojas de vida. Recibes una HV en JSON y un IDIOMA DESTINO. Devuelves la MISMA HV traducida, conservando exactamente los hechos.
+
+Devuelve ÚNICAMENTE JSON con la misma forma que la HV recibida:
+{
+  "headline": "...", "summary": "...", "skills": [...],
+  "experience": [{"role":"...","company":"...","period":"...","bullets":["..."]}],
+  "projects": [{"name":"...","highlights":["..."]}],
+  "education": [{"institution":"...","degree":"...","period":"..."}],
+  "softSkills": [...], "keywords": [...],
+  "coverLetter": "solo si venía en la HV"
+}
+
+Reglas estrictas:
+- Traducí TODO el texto al idioma destino.
+- NO cambies hechos: empresas, cargos, fechas y métricas se conservan. Los nombres propios y de tecnologías (Node.js, PostgreSQL, NestJS, AWS…) NO se traducen.
+- Mantené la MISMA cantidad y el MISMO orden de experiencias, proyectos, educación y viñetas.
+- Si la HV traía "coverLetter", traducila y devolvé también "coverLetter".
+- No agregues markdown ni texto fuera del JSON.`;
 
 @Injectable()
 export class ResumeEditService {
@@ -139,6 +169,80 @@ export class ResumeEditService {
       content: content as RefineResult['content'],
       applied: true,
       note: 'Borrador reorganizado. Revisá la vista previa y ajustá lo que quieras.',
+    };
+  }
+
+  /**
+   * Traduce el borrador a `target` CONSERVANDO las ediciones: no re-redacta
+   * desde el perfil, solo cambia el idioma del contenido que el usuario ya
+   * revisó (y de la carta, si la tenía). Guarda en el mismo borrador.
+   */
+  async translate(draftId: string, target: TargetLanguage): Promise<TranslateResult> {
+    const draft = await this.prisma.resumeDraft.findUnique({
+      where: { id: draftId },
+      include: { profile: true },
+    });
+    if (!draft) throw new NotFoundException(`Borrador ${draftId} no existe`);
+
+    const previous = (draft.content ?? {}) as Record<string, unknown>;
+    const current = ResumeContentSchema.parse(previous);
+    const currentLetter =
+      typeof previous.coverLetter === 'string' ? previous.coverLetter : undefined;
+
+    const ai = await this.llm.json(
+      TRANSLATE_PROMPT,
+      `IDIOMA DESTINO: ${target === 'en' ? 'inglés' : 'español'}\n\nHOJA DE VIDA (JSON):\n${JSON.stringify(
+        { ...current, ...(currentLetter ? { coverLetter: currentLetter } : {}) },
+        null,
+        2,
+      )}`,
+    );
+
+    if (!ai) {
+      return {
+        content: { ...current, ...(currentLetter ? { coverLetter: currentLetter } : {}) },
+        applied: false,
+        language: target,
+        note: 'El proveedor de IA no está configurado: no se pudo traducir la HV.',
+      };
+    }
+
+    const parsed = ResumeContentSchema.parse(ai);
+    const markdown = renderResumeMarkdown(parsed, draft.profile?.name ?? 'CV');
+    const translatedLetter =
+      typeof ai.coverLetter === 'string' && ai.coverLetter.trim().length > 0
+        ? normalizeParagraphs(ai.coverLetter)
+        : currentLetter;
+    const content: Record<string, unknown> = {
+      ...parsed,
+      markdown,
+      language: target,
+      // El modo ATS es una preferencia del borrador, no del texto: se conserva.
+      ...(previous.atsMode ? { atsMode: true } : {}),
+      ...(translatedLetter
+        ? {
+            coverLetter: translatedLetter,
+            coverLetterSource: 'ia',
+            coverLetterUpdatedAt: new Date().toISOString(),
+          }
+        : {}),
+    };
+
+    await this.prisma.resumeDraft.update({
+      where: { id: draftId },
+      data: { content: content as Prisma.InputJsonValue, version: { increment: 1 } },
+    });
+
+    this.logger.log(
+      { msg: 'borrador traducido (ediciones conservadas)', draftId, target, provider: this.llm.name },
+      ResumeEditService.name,
+    );
+
+    return {
+      content: content as TranslateResult['content'],
+      applied: true,
+      language: target,
+      note: `HV traducida a ${target === 'en' ? 'inglés' : 'español'}. Revisá la vista previa.`,
     };
   }
 

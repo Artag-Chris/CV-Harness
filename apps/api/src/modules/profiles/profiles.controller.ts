@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { ProfileScheduleDto, ImportProfileResumeDto } from '../../common/api-dto';
+import { normalizeApplyLanguage } from '../../common/apply-language';
 import { PrismaService } from '../../common/prisma.service';
 import { DispatchService } from '../scheduler/dispatch.service';
 import { ProfileBackfillService } from './profile-backfill.service';
@@ -24,6 +25,8 @@ interface UpdateProfileBody {
   summary?: string;
   email?: string | null;
   isPrimary?: boolean;
+  /** Idioma de postulación por defecto: 'auto' (idioma de la vacante) | 'es' | 'en'. */
+  applyLanguage?: string;
 }
 
 @Controller('profiles')
@@ -67,6 +70,13 @@ export class ProfilesController {
     if (body.headline !== undefined) data.headline = body.headline;
     if (body.summary !== undefined) data.summary = body.summary;
     if (body.email !== undefined) data.email = body.email?.trim() || null;
+    if (body.applyLanguage !== undefined) {
+      const applyLanguage = normalizeApplyLanguage(body.applyLanguage);
+      if (!applyLanguage) {
+        throw new BadRequestException('applyLanguage debe ser "auto", "es" o "en"');
+      }
+      data.applyLanguage = applyLanguage;
+    }
 
     if (body.isPrimary === true) {
       // Solo un primario: se degrada el resto en la misma transacción.

@@ -14,6 +14,11 @@ export interface AtsContent {
   keywords?: string[];
   /** Interruptor por borrador: decide qué encabezados y maquetación imprime el PDF. */
   atsMode?: boolean;
+  /**
+   * Idioma declarado del borrador (`auto|es|en`). Con `es`/`en` manda sobre la
+   * detección por marcadores; con `auto` (o ausente) se detecta del contenido.
+   */
+  language?: 'auto' | 'es' | 'en';
 }
 
 export interface AtsProfile {
@@ -70,7 +75,12 @@ export function resumeText(content: AtsContent): string {
 
 export function analyzeAts({ content, profile, vacancy }: AnalyzeInput): AtsAnalysis {
   const atsMode = content.atsMode === true;
-  const language = detectLanguage(content.summary, content.headline, ...(content.skills ?? []));
+  // El idioma declarado (selector del borrador/perfil) manda; si es `auto` se
+  // detecta del contenido, que es como funcionaba antes de existir el selector.
+  const language: AtsLanguage =
+    content.language === 'es' || content.language === 'en'
+      ? content.language
+      : detectLanguage(content.summary, content.headline, ...(content.skills ?? []));
   const text = resumeText(content);
   const warnings: string[] = [];
   const suggestions: string[] = [];

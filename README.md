@@ -84,6 +84,7 @@ flowchart TD
 - **HV generada a medida** por vacante, con una plantilla calcada del CV original (colores, tipografías, QR al portafolio).
 - **Importar la HV desde markdown (con IA)**: se pega la HV y el LLM la parsea al **perfil estructurado** (experiencias, proyectos, skills, formación, enlaces) —que es de donde se arma la HV generada—. Reemplaza cada sección **solo si el parseo trae datos**, así un parseo parcial no vacía el perfil.
 - **Carta de presentación** generada por IA (o determinística sin proveedor) y editable.
+- **Selector de idioma**: por perfil (idioma de postulación por defecto: **Auto** = sigue el idioma de la vacante, o forzar **Español/Inglés**) y con **override por HV**. Cambiar el idioma de una HV ya editada la **traduce con IA preservando tus ediciones** (y la carta); el PDF y el medidor ATS usan encabezados en ese idioma.
 - **Editor tipo Canva**: editar titular, resumen, y agregar/quitar/reordenar experiencia, proyectos, skills y formación; vista previa en **pop-out** antes de guardar.
 - **"La IA organiza el boceto"**: un endpoint reordena/acorta/reescribe secciones sin inventar hechos, y **conserva la carta**.
 - **PDF en el navegador** (`@react-pdf/renderer`): el mismo motor hace la vista previa y la descarga, con **texto seleccionable** (compatible con ATS).
@@ -216,7 +217,7 @@ REST con **Swagger en `/api/docs`**, autenticada con el **mismo JWT** de `atiend
 - `GET /vacancies?...` (filtros: `status`, `profileId`, `q`, `minScore`, **`modality`**, **`seniority`**, **`location`**) · `GET /vacancies/:id` · `POST /vacancies/:id/status` · `POST /vacancies/:id/generate-resume`
 - `POST /vacancies/from-text` (ofertas pegadas a mano)
 - `GET|POST|DELETE /resumes` · `POST /resumes/:id/activate`
-- `PATCH /resumes/:id` · `POST /resumes/:id/refine` · `POST /resumes/:id/cover-letter`
+- `PATCH /resumes/:id` · `POST /resumes/:id/refine` · `POST /resumes/:id/translate` (traduce conservando ediciones) · `POST /resumes/:id/cover-letter`
 - `POST /resumes/:id/ats` · `POST /resumes/:id/ats/keywords`
 - `GET /notifications` · `POST /notifications/:id/read` · `GET /health`
 
@@ -225,7 +226,7 @@ REST con **Swagger en `/api/docs`**, autenticada con el **mismo JWT** de `atiend
 ## Verificación
 
 ```bash
-# API: 147 tests (vitest)
+# API: 159 tests (vitest)
 cd apps/api && npx vitest run
 
 # PDF: renderiza HV + carta y comprueba fuentes embebidas y texto extraíble

@@ -135,3 +135,74 @@ describe('ResumeEditService.refine', () => {
     await expect(service.refine('nope', 'algo')).rejects.toThrow(/no existe/i);
   });
 });
+
+describe('ResumeEditService.translate', () => {
+  it('traduce conservando ediciones, guarda el idioma y traduce la carta', async () => {
+    const { service, updates } = makeService({
+      draft,
+      llmResult: {
+        headline: 'AI Engineer',
+        summary: 'Original summary.',
+        skills: ['TypeScript', 'NestJS'],
+        experience: [
+          {
+            role: 'Team Leader',
+            company: 'Finova SAS',
+            period: '2024 - 2026',
+            bullets: ['Led a team'],
+          },
+        ],
+        projects: [{ name: 'Atiende', highlights: ['Conversational AI'] }],
+        education: [{ institution: 'SENA', degree: 'Design', period: '2023' }],
+        softSkills: ['Leadership'],
+        keywords: ['node'],
+        coverLetter: 'Dear team, I am writing to apply.',
+      },
+    });
+
+    const result = await service.translate('d1', 'en');
+    expect(result.applied).toBe(true);
+    expect(result.language).toBe('en');
+
+    const saved = updates[0].content as Record<string, unknown>;
+    expect(saved.language).toBe('en');
+    expect(saved.summary).toBe('Original summary.');
+    // La carta se traduce y queda marcada como generada por IA.
+    expect(saved.coverLetter).toBe('Dear team, I am writing to apply.');
+    expect(saved.coverLetterSource).toBe('ia');
+    expect(String(saved.markdown)).toContain('Christian Henao');
+    expect(updates[0].version).toEqual({ increment: 1 });
+  });
+
+  it('conserva el Modo ATS (es preferencia del borrador, no del texto)', async () => {
+    const { service, updates } = makeService({
+      draft: { ...draft, content: { ...currentContent, atsMode: true } },
+      llmResult: {
+        headline: 'AI Engineer',
+        summary: 'X.',
+        skills: [],
+        experience: [],
+        projects: [],
+        education: [],
+        softSkills: [],
+        keywords: [],
+      },
+    });
+    await service.translate('d1', 'en');
+    const saved = updates[0].content as Record<string, unknown>;
+    expect(saved.atsMode).toBe(true);
+  });
+
+  it('sin proveedor LLM no toca la BD y avisa', async () => {
+    const { service, updates } = makeService({ draft, llmResult: null });
+    const result = await service.translate('d1', 'en');
+    expect(result.applied).toBe(false);
+    expect(result.note).toMatch(/no está configurado/i);
+    expect(updates).toHaveLength(0);
+  });
+
+  it('un borrador inexistente da 404', async () => {
+    const { service } = makeService({ draft: null });
+    await expect(service.translate('nope', 'en')).rejects.toThrow(/no existe/i);
+  });
+});
