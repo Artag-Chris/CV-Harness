@@ -73,4 +73,25 @@ describe('PATCH /resumes/:id (edición manual)', () => {
     const saved = updates[0].content as Record<string, unknown>;
     expect(saved).not.toHaveProperty('coverLetter');
   });
+
+  /**
+   * Regresión: `atsMode` no es texto redactado, así que zod lo descartaba y el
+   * interruptor del Modo ATS se perdía en el primer guardado. El usuario veía el
+   * score alto en pantalla pero al recargar volvía la plantilla de dos columnas.
+   */
+  it('persiste el Modo ATS', async () => {
+    const { controller, updates } = makeController({ ...baseContent });
+    await controller.update('d1', { content: { ...baseContent, atsMode: true } });
+    const saved = updates[0].content as Record<string, unknown>;
+    expect(saved.atsMode).toBe(true);
+  });
+
+  it('sin la marca no deja atsMode en el contenido', async () => {
+    const { controller, updates } = makeController({ ...baseContent, atsMode: true });
+    await controller.update('d1', { content: { ...baseContent } });
+    const saved = updates[0].content as Record<string, unknown>;
+    // Apagarlo también debe persistirse: si queda la clave, el analizador
+    // seguiría midiendo la HV de una columna.
+    expect(saved).not.toHaveProperty('atsMode');
+  });
 });

@@ -122,6 +122,35 @@ describe('ResumeEditService.refine', () => {
     expect(updates).toHaveLength(0);
   });
 
+  /**
+   * Regresión: `refine` reconstruía el contenido desde la respuesta de la IA, que
+   * no trae estas preferencias, así que reorganizar apagaba el Modo ATS y borraba
+   * el idioma elegido para esa HV.
+   */
+  it('conserva el Modo ATS y el idioma al reorganizar', async () => {
+    const { service, updates } = makeService({
+      draft: { ...draft, content: { ...currentContent, atsMode: true, language: 'en' } },
+      llmResult: {
+        headline: 'AI Engineer',
+        summary: 'Resumen reorganizado.',
+        skills: ['TypeScript'],
+        experience: [
+          { role: 'Team Leader', company: 'Finova SAS', period: '2024', bullets: ['Lideré'] },
+        ],
+        projects: [],
+        education: [],
+        softSkills: [],
+        keywords: [],
+      },
+    });
+
+    await service.refine('d1', 'ordénalo');
+
+    const saved = updates[0].content as Record<string, unknown>;
+    expect(saved.atsMode).toBe(true);
+    expect(saved.language).toBe('en');
+  });
+
   it('sin instrucción no llama a la IA', async () => {
     const { service, updates } = makeService({ draft, llmResult: null });
     const result = await service.refine('d1', '   ');

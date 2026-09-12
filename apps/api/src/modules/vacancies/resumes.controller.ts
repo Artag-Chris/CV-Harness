@@ -30,6 +30,10 @@ export class ResumeController {
     // El idioma (auto|es|en) no es contenido redactado: zod lo descartaría, así
     // que se rescata aparte para que el selector por HV pueda persistirlo.
     const language = normalizeApplyLanguage(rest.language);
+    // El Modo ATS tampoco es texto redactado: zod lo descarta y, sin rescatarlo,
+    // activarlo se perdía en el primer guardado (el PDF salía a dos columnas y el
+    // score volvía atrás al recargar).
+    const atsMode = rest.atsMode === true;
     const markdown = renderResumeMarkdown(
       parsed,
       resume.profile?.name ?? 'CV',
@@ -61,6 +65,7 @@ export class ResumeController {
           ...parsed,
           markdown,
           ...(language ? { language } : {}),
+          ...(atsMode ? { atsMode: true } : {}),
           ...coverLetterFields,
         } as Prisma.InputJsonValue,
         status: 'FINAL',

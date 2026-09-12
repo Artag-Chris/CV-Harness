@@ -131,6 +131,11 @@ export class ResumeEditService {
       ...parsed,
       markdown,
       ...pickCoverLetter(previous),
+      // Preferencias del borrador que no son texto redactado y que la IA no
+      // devuelve: sin rescatarlas, reorganizar apagaba el Modo ATS y perdía el
+      // idioma elegido para esa HV.
+      ...(previous.atsMode ? { atsMode: true } : {}),
+      ...(typeof previous.language === 'string' ? { language: previous.language } : {}),
     };
 
     const updated = await this.prisma.resumeDraft.update({

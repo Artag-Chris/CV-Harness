@@ -56,6 +56,31 @@ Medido contra la API real:
   (`retryAttempts: 3`, `retryDelayMs: 2500`, backoff ×2) y `maxPages: 1` en la plantilla.
 - `diagnoseBlock` ahora explica también `500/502/504` como fallo transitorio del portal.
 
+## MODO ATS: GUARDARLO Y DESCARGARLO (2026-09-12, 5ª parte)
+Pedido: «la IA me organizó el currículum pero no veo dónde descargarlo con lo nuevo
+que me arregló la IA para pasar el filtro ATS».
+- **Causa raíz (bug real)**: `PATCH /resumes/:id` guardaba
+  `{...parsed, markdown, language, coverLetter}` y **descartaba `atsMode`** (no está
+  en `ResumeContentSchema`, y zod lo tira). Consecuencia: activar el Modo ATS parecía
+  funcionar en pantalla (el estado local sí lo tenía) pero el servidor guardaba la HV
+  sin la marca → al recargar el modo desaparecía y el PDF salía a dos columnas.
+  La ruta `/translate` sí lo rescataba (por eso el idioma se guardaba y esto no).
+- **Segundo bug del mismo tipo**: `refine` (reorganizar con IA) reconstruía el
+  contenido desde la respuesta de la IA (`...parsed`) → apagaba el Modo ATS y perdía
+  el `language` del borrador.
+- **Arreglos**: rescatar `atsMode` (y conservar `language`) en el PATCH del controlador
+  y en `refine`. +3 tests de regresión (`resume-draft-patch`: persiste y no deja la
+  clave al apagarlo; `resume-edit`: `refine` conserva modo e idioma).
+- **UI**: en la pestaña ATS ahora hay **«Descargar en Modo ATS»** (el botón que faltaba:
+  antes había que adivinar que «Descargar PDF» incluía el modo) y un aviso con
+  **«Guardar cambios»** cuando hay cambios locales — «Acomodarlas con IA» NO guarda
+  nunca (por diseño: se revisa antes). El botón de descarga del panel y del modal dice
+  **«Descargar PDF (ATS)»** cuando el modo está encendido.
+- **Ojo al desplegar**: las HV que ya se guardaron con este bug **perdieron la marca**;
+  hay que volver a encender el Modo ATS una vez (después queda).
+- Verificación: API **200 tests** (28 archivos) + `nest build`; dashboard `tsc` +
+  `next build` OK.
+
 ## URL DEL AVISO Y PORTAL DE ORIGEN (2026-09-12, 4ª parte)
 Pedido: «necesito la url de los trabajos para saber dónde está la vacante». La ficha
 solo tenía el botón "Aplicar ↗"; no se veía a dónde iba ni en qué portal vivía el aviso.
