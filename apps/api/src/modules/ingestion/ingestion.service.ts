@@ -5,6 +5,7 @@ import { Prisma, VacancyStatus } from '@prisma/client';
 import { z } from 'zod';
 import { JsonLogger } from '../../common/json-logger.service';
 import { fingerprint } from '../../common/hash.util';
+import { canonicalModalities } from '../../common/job-facets';
 import { PrismaService } from '../../common/prisma.service';
 import { cleanDescription } from '../../common/text.util';
 import { queueName, QUEUES } from '../../config/queue.config';
@@ -141,6 +142,9 @@ export class IngestionService {
           location: item.location ?? null,
           salary: item.salary ?? null,
           modality: item.modality ?? null,
+          // Facet canónico ya en la ingesta: si el portal trae la modalidad, el
+          // filtro funciona incluso antes de normalizar.
+          modalityTypes: canonicalModalities(item.modality),
           postedAt,
           descriptionRaw: descriptionText,
           raw: {

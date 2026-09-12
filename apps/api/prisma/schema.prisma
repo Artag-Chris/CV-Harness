@@ -271,7 +271,12 @@ model Vacancy {
   company        String?
   location       String?
   salary         String?
+  // Texto original del portal ("Remoto", "Híbrido / Remoto"…): es lo que se muestra.
   modality       String?
+  // Facets canónicos para filtrar de forma confiable (el texto libre no sirve
+  // como filtro). modalityTypes es multi-valor: hay avisos que ofrecen varias.
+  modalityTypes  String[] @default([]) // REMOTE | HYBRID | ONSITE
+  seniorityLevel String? // TRAINEE | JUNIOR | SEMI_SENIOR | SENIOR | LEAD
   postedAt       DateTime?
   descriptionRaw String        @db.Text
   // Enriquecimiento LLM (JSONB): { summary, keyRequirements[], niceToHave[],
@@ -295,6 +300,9 @@ model Vacancy {
   @@index([status])
   @@index([sourceId])
   @@index([profileId])
+  @@index([seniorityLevel])
+  // GIN para el filtro por arrays (hasSome) de modalidad.
+  @@index([modalityTypes], type: Gin)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

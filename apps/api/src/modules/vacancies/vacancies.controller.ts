@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { VacancyStatus } from '@prisma/client';
 import { VacancyStatusDto } from '../../common/api-dto';
+import { parseModalities, parseSeniorities } from '../../common/job-facets';
 import { VacanciesService } from './vacancies.service';
 
 const VALID_STATUS = new Set(['APPLIED', 'IGNORED']);
@@ -27,6 +28,9 @@ export class VacanciesController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('minScore') minScore?: string,
+    @Query('modality') modality?: string,
+    @Query('seniority') seniority?: string,
+    @Query('location') location?: string,
   ) {
     const parsedMin = minScore != null && minScore !== '' ? Number(minScore) : undefined;
     return this.vacancies.list({
@@ -37,6 +41,9 @@ export class VacanciesController {
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
       minScore: parsedMin != null && Number.isFinite(parsedMin) ? parsedMin : undefined,
+      modality: parseModalities(modality),
+      seniority: parseSeniorities(seniority),
+      location: location?.trim() || undefined,
     });
   }
 

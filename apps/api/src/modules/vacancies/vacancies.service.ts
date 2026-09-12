@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Prisma, VacancyProfileStatus, VacancyStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../common/prisma.service';
+import type { ModalityType, SeniorityLevel } from '../../common/job-facets';
 import { queueName, QUEUES } from '../../config/queue.config';
 import { recomputeVacancyAggregate } from './aggregate';
 
@@ -16,6 +17,11 @@ export interface VacancyListQuery {
   offset?: number;
   /** Solo vacantes con algún match >= minScore (evita listar el ruido). */
   minScore?: number;
+  /** Facets canónicos: modalidad (inclusivo) y seniority. */
+  modality?: ModalityType[];
+  seniority?: SeniorityLevel[];
+  /** Búsqueda por texto en la ubicación (ej. "Bogotá", "Medellín"). */
+  location?: string;
 }
 
 const ALLOWED_STATUS: VacancyStatus[] = [
@@ -83,6 +89,15 @@ export class VacanciesService {
       // scraping trae (incluido lo que no encaja) inunda la pestaña Vacantes.
       ...(typeof query.minScore === 'number' && Number.isFinite(query.minScore)
         ? { matches: { some: { ...profileScope, score: { gte: query.minScore } } } }
+        : {}),
+      // Modalidad inclusiva: pedir "Remota" trae también las que ofrecen remoto
+      // entre varias opciones ("Híbrido / Remoto" → REMOTE + HYBRID).
+      ...(query.modality?.length
+        ? { modalityTypes: { hasSome: query.modality } }
+        : {}),
+      ...(query.seniority?.length ? { seniorityLevel: { in: query.seniority } } : {}),
+      ...(query.location
+        ? { location: { contains: query.location, mode: 'insensitive' as const } }
         : {}),
       ...(query.q
         ? {

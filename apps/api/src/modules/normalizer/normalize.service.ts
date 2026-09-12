@@ -3,6 +3,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import { VacancyStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { JsonLogger } from '../../common/json-logger.service';
+import {
+  canonicalModalities,
+  canonicalSeniority,
+  SENIORITY_LABELS,
+} from '../../common/job-facets';
 import { PrismaService } from '../../common/prisma.service';
 import { TECH_DICTIONARY } from '../../common/tech-dictionary';
 import { cleanDescription } from '../../common/text.util';
@@ -69,6 +74,9 @@ export class NormalizeService {
         location: vacancy.location ?? extracted.location ?? null,
         salary: vacancy.salary ?? extracted.salary ?? null,
         modality: vacancy.modality ?? extracted.modality ?? null,
+        // Facets canónicos: es lo que filtra el listado del dashboard.
+        modalityTypes: canonicalModalities(vacancy.modality, extracted.modality),
+        seniorityLevel: canonicalSeniority(extracted.seniority, vacancy.title),
       },
     });
 
@@ -145,18 +153,8 @@ export class NormalizeService {
     const salaryMatch = cleaned.match(/((?:\$|COP\s*)?[\d.,]+(?:\s*-\s*[\d.,]+)?\s*(?:COP|USD|millones|pesos)?)/i);
     const salary = salaryMatch && /[\d.]{4,}/.test(salaryMatch[1]) ? salaryMatch[1].trim() : null;
 
-    const seniority =
-      (lower.includes('lead') || lower.includes('team leader') || lower.includes('tech lead'))
-        ? 'Lead'
-        : lower.includes('senior') || lower.includes('sr.')
-          ? 'Senior'
-          : lower.includes('semi senior') || lower.includes('semisenior')
-            ? 'Semi Senior'
-            : lower.includes('junior') || lower.includes('jr.')
-              ? 'Junior'
-              : lower.includes('trainee')
-                ? 'Trainee'
-                : null;
+    const seniorityLevel = canonicalSeniority(cleaned);
+    const seniority = seniorityLevel ? SENIORITY_LABELS[seniorityLevel] : null;
 
     const bullets = cleaned
       .split('\n')

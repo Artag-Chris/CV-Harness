@@ -1,7 +1,37 @@
 # Constancia — próxima sesión (continuar)
 
-> Estado: 2026-09-09. Proyecto **cv-harness** + pestaña **CV Harness** en el
+> Estado: 2026-09-12. Proyecto **cv-harness** + pestaña **CV Harness** en el
 > front `dashboard/` (hermano de atiende).
+
+## FILTROS DE VACANTES CON FACETS CANÓNICOS + README PORTAFOLIO (2026-09-12)
+- **Problema**: `Vacancy.modality` era texto libre ("Híbrido / Remoto", "100%
+  remoto", "on-site") y no había filtro; además el extractor determinístico
+  clasificaba "Semi Senior" como "Senior" (bug real: `includes('senior')`
+  ganaba antes que la comprobación de semisenior).
+- **Taxonomía canónica** (`apps/api/src/common/job-facets.ts`): modalidad
+  `REMOTE|HYBRID|ONSITE` (multi-valor: un aviso puede ofrecer varias) y
+  seniority `TRAINEE|JUNIOR|SEMI_SENIOR|SENIOR|LEAD`. Se conserva el texto
+  original en `modality` para mostrarlo. `SENIORITY_LABELS` para la UI.
+- **Schema + migración** `20260912000000_vacancy_facets`: columnas
+  `modalityTypes TEXT[] @default([])` y `seniorityLevel TEXT?`, índice btree de
+  seniority + **GIN** (`@@index([modalityTypes], type: Gin)`), y **backfill** en
+  SQL derivando los facets del texto ya guardado.
+- **Pipeline**: ingestion setea `modalityTypes` desde el scrape; el normalizer
+  setea `modalityTypes` + `seniorityLevel` desde la extracción (LLM o
+  determinística) y ya usa `canonicalSeniority` (corrige el bug de semi senior).
+- **API**: `GET /vacancies?modality=REMOTE,HYBRID&seniority=SENIOR&location=Bogotá`
+  (modalidad inclusiva con `hasSome`; ubicación `contains` insensible).
+- **Dashboard**: en Vacantes, selects de **Modalidad** y **Seniority** e input de
+  **Ubicación**, más chips de modalidad/seniority por fila
+  (`cv-ui.tsx`: `MODALITY_OPTIONS`, `SENIORITY_OPTIONS`, `ModalityChips`).
+- **Tests**: +18 (`job-facets`, filtros en `vacancies.service`) → **141 en total**.
+  `npx vitest run` verde; `nest build` ok; dashboard `tsc --noEmit` ok y
+  `next build` ok (quedan los **4 errores de ESLint preexistentes** de React).
+- **README**: reescrito como pieza de portafolio (problema, diagramas Mermaid de
+  arquitectura y datos, features, decisiones de diseño, stack, comandos,
+  filtros, API, verificación, roadmap).
+- **Ojo para el server**: aplicar la migración nueva (`migrate deploy` corre en
+  el boot) — el backfill de facets recalcula las vacantes ya guardadas.
 
 ## LO ÚLTIMO HECHO (verificado en docker, 2026-09-09)
 - **Auth sin 2do login**: la pestaña CV usa la sesión de atiende (`atiende_auth`);

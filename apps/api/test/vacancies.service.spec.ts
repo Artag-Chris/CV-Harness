@@ -148,3 +148,51 @@ describe('VacanciesService.get — detalle por perfil', () => {
     ]);
   });
 });
+
+describe('VacanciesService.list — filtros de facets', () => {
+  it('filtra por modalidad canónica de forma inclusiva', async () => {
+    const { service, captured } = makeService();
+    await service.list({ modality: ['REMOTE'] });
+    expect(captured.where).toMatchObject({ modalityTypes: { hasSome: ['REMOTE'] } });
+  });
+
+  it('sin modalidad no agrega el filtro (se ve todo)', async () => {
+    const { service, captured } = makeService();
+    await service.list({ modality: [] });
+    expect(captured.where).not.toHaveProperty('modalityTypes');
+  });
+
+  it('filtra por seniority canónico', async () => {
+    const { service, captured } = makeService();
+    await service.list({ seniority: ['SENIOR', 'SEMI_SENIOR'] });
+    expect(captured.where).toMatchObject({
+      seniorityLevel: { in: ['SENIOR', 'SEMI_SENIOR'] },
+    });
+  });
+
+  it('filtra por ubicación por texto (insensible a mayúsculas)', async () => {
+    const { service, captured } = makeService();
+    await service.list({ location: 'Bogotá' });
+    expect(captured.where).toMatchObject({
+      location: { contains: 'Bogotá', mode: 'insensitive' },
+    });
+  });
+
+  it('combina los facets con estado, perfil y minScore', async () => {
+    const { service, captured } = makeService();
+    await service.list({
+      status: 'MATCHED',
+      profileId: 'p-juan',
+      minScore: 70,
+      modality: ['HYBRID'],
+      seniority: ['SENIOR'],
+      location: 'remoto',
+    });
+    expect(captured.where).toMatchObject({
+      status: 'MATCHED',
+      modalityTypes: { hasSome: ['HYBRID'] },
+      seniorityLevel: { in: ['SENIOR'] },
+      matches: { some: { profileId: 'p-juan', score: { gte: 70 } } },
+    });
+  });
+});
