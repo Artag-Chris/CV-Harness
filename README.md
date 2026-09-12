@@ -82,6 +82,7 @@ flowchart TD
 
 ### 📄 Hojas de vida y cartas
 - **HV generada a medida** por vacante, con una plantilla calcada del CV original (colores, tipografías, QR al portafolio).
+- **Importar la HV desde markdown (con IA)**: se pega la HV y el LLM la parsea al **perfil estructurado** (experiencias, proyectos, skills, formación, enlaces) —que es de donde se arma la HV generada—. Reemplaza cada sección **solo si el parseo trae datos**, así un parseo parcial no vacía el perfil.
 - **Carta de presentación** generada por IA (o determinística sin proveedor) y editable.
 - **Editor tipo Canva**: editar titular, resumen, y agregar/quitar/reordenar experiencia, proyectos, skills y formación; vista previa en **pop-out** antes de guardar.
 - **"La IA organiza el boceto"**: un endpoint reordena/acorta/reescribe secciones sin inventar hechos, y **conserva la carta**.
@@ -210,7 +211,7 @@ npm run docker:ps
 REST con **Swagger en `/api/docs`**, autenticada con el **mismo JWT** de `atiende`. Módulos principales:
 
 - `POST /auth/login`
-- `GET|POST|PATCH|DELETE /profiles` · `PUT /profiles/:id/sources` · `POST /profiles/:id/run` · `POST /profiles/:id/backfill`
+- `GET|POST|PATCH|DELETE /profiles` · `PUT /profiles/:id/sources` · `POST /profiles/:id/run` · `POST /profiles/:id/backfill` · `POST /profiles/:id/import-resume` (parchea el perfil desde el markdown con IA)
 - `GET|POST|PATCH|DELETE /sources` · `POST /sources/probe` (verificación + receta asistida) · `POST /sources/:id/run`
 - `GET /vacancies?...` (filtros: `status`, `profileId`, `q`, `minScore`, **`modality`**, **`seniority`**, **`location`**) · `GET /vacancies/:id` · `POST /vacancies/:id/status` · `POST /vacancies/:id/generate-resume`
 - `POST /vacancies/from-text` (ofertas pegadas a mano)
@@ -224,7 +225,7 @@ REST con **Swagger en `/api/docs`**, autenticada con el **mismo JWT** de `atiend
 ## Verificación
 
 ```bash
-# API: 141 tests (vitest)
+# API: 147 tests (vitest)
 cd apps/api && npx vitest run
 
 # PDF: renderiza HV + carta y comprueba fuentes embebidas y texto extraíble

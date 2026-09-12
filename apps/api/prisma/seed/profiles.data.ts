@@ -51,11 +51,11 @@ export interface ProfileSeed {
 export const profileSeed: ProfileSeed = {
   name: 'Christian Henao',
   headline: ['AI Engineer', 'Team Leader', 'Full Stack Developer'],
-  summary: `AI Engineer y Team Leader con base sólida en desarrollo backend de sistemas distribuidos, especializado en aplicaciones potenciadas por LLMs, arquitecturas de agentes y pipelines de IA en producción. Lidero un equipo de 4 desarrolladores: distribución de tareas, definición de prioridades, code reviews y garantía de entregas robustas.
+  summary: `AI Engineer y Team Leader con más de 3 años construyendo y manteniendo sistemas backend en producción, especializado en aplicaciones potenciadas por LLMs, arquitecturas de agentes y pipelines de IA event-driven. Diseño sistemas que usan modelos de lenguaje como componente de ingeniería serio: control de costos por conversación, caching multinivel, circuit breaker multi-proveedor, RAG sobre PostgreSQL + pgvector y observabilidad.
 
-Experiencia transferible en microservicios, comunicación event-driven (NATS, RabbitMQ, WebSockets, webhooks), orquestación con Kubernetes e integraciones con APIs de terceros — la base para desplegar sistemas con modelos de lenguaje, tool use y workflows agénticos confiables.
+Llevé dos productos de IA a producción y en línea: Atiende (agente conversacional multicanal para PYMEs, operativo en WhatsApp, Instagram DM y Facebook Messenger) y CV Harness (harness event-driven que detecta vacantes, las puntúa con IA y genera hojas de vida personalizadas). Ambos con arquitectura por capas, patrón adaptador para proveedores LLM, test suites propias y despliegue con Docker sobre infraestructura compartida.
 
-Usuario avanzado de Claude Code y del ecosistema Anthropic; construyo mis proyectos con desarrollo asistido por IA como práctica diaria, con experiencia hands-on en prompt engineering aplicado, diseño de workflows con agentes y ciclo human-in-the-loop. Combino disciplina de ingeniería de software (seguridad, escalabilidad, patrones) con el rigor de llevar LLMs a producción: control de costos, latencia, observabilidad y sistemas confiables. Actualmente profundizando en RAG, frameworks de agentes, fine-tuning y MLOps.`,
+Fui Team Leader de un equipo de 4 desarrolladores (Finova SAS, hasta agosto 2026): distribución de tareas, definición técnica, code reviews y garantía de entregas. Combino disciplina de ingeniería de software (seguridad, escalabilidad, patrones, testing) con el rigor de llevar LLMs a producción: control de costos, latencia, idempotencia y resiliencia anti-vendor-lockin. Trabajo con un flujo spec-driven y desarrollo asistido por IA (Claude Code, MCP servers, subagentes).`,
   email: 'scristxyz@gmail.com',
   phone: '+57 320 571 1428',
   location: 'Pereira, Risaralda, Colombia',
@@ -83,12 +83,13 @@ Usuario avanzado de Claude Code y del ecosistema Anthropic; construyo mis proyec
       role: 'Team Leader & Full Stack Developer',
       company: 'Finova SAS',
       periodStart: '2024',
-      periodEnd: 'Presente',
-      isCurrent: true,
+      periodEnd: 'Ago 2026',
+      isCurrent: false,
       bullets: [
-        'Lidero un equipo de 4 desarrolladores: distribución y priorización de tareas, definición técnica, code reviews y garantía de entregas.',
-        'Coordino el ciclo completo: planeación, ejecución y desbloqueo del equipo en escenarios técnicos complejos.',
-        'Construyo y mantengo sistemas backend y frontend en producción para servicios financieros, con foco en seguridad, integraciones bancarias y arquitecturas escalables.',
+        'Lideré un equipo de 4 desarrolladores: distribución y priorización de tareas, definición técnica, code reviews y garantía de entregas en producción.',
+        'Coordiné el ciclo completo: planeación, ejecución y desbloqueo del equipo en escenarios técnicos complejos.',
+        'Construí y mantuve sistemas backend y frontend en producción para servicios financieros, con foco en seguridad, integraciones bancarias y arquitecturas escalables.',
+        'Diseñé integraciones con APIs bancarias y pasarelas de pago: webhooks de estado en tiempo real, jobs de reconciliación e idempotencia.',
         'Introduje y consolidé herramientas de desarrollo asistido por IA (Claude Code, LLMs) en el flujo del equipo, acelerando iteraciones con calidad y revisiones humanas.',
       ],
     },
@@ -120,7 +121,7 @@ Usuario avanzado de Claude Code y del ecosistema Anthropic; construyo mis proyec
     {
       name: 'Atiende — Agente conversacional de IA para WhatsApp Business',
       summary:
-        'Arquitecto y líder de desarrollo de un agente de IA conversacional para WhatsApp de PYMEs latinoamericanas. Arquitectura hexagonal estricta (ports & adapters), cache multinivel (prompt caching Anthropic, semántico en pgvector, exacto en Redis), feature flags por módulo, pipeline asíncrono con BullMQ + Redis y RAG semántico sobre catálogos con pgvector.',
+        'Arquitecto y líder de desarrollo de un agente de IA conversacional para PYMEs latinoamericanas, EN PRODUCCIÓN sobre 3 canales (WhatsApp, Instagram DM, Facebook Messenger). Arquitectura hexagonal estricta (ports & adapters), cache multinivel (prompt caching Anthropic, semántico en pgvector, exacto en Redis), router LLM multi-proveedor con circuit breaker, feature flags por módulo, pipeline asíncrono con BullMQ + Redis y RAG semántico sobre catálogos con pgvector. 295 tests.',
       stack: [
         'TypeScript',
         'NestJS 11',
@@ -129,6 +130,7 @@ Usuario avanzado de Claude Code y del ecosistema Anthropic; construyo mis proyec
         'Redis 7',
         'BullMQ',
         'Anthropic Claude API',
+        'Groq',
         'OpenAI Embeddings',
         'Meta WhatsApp Business API',
         'Docker',
@@ -136,9 +138,35 @@ Usuario avanzado de Claude Code y del ecosistema Anthropic; construyo mis proyec
       repositoryUrl: 'https://github.com/Artag-Chris/atiende',
       visibility: 'public',
       highlights: [
-        'Diseñé el pipeline de agentes con tool use, presupuesto USD por conversación y circuit breaker multi-proveedor LLM.',
+        'Operativo en producción en 3 canales (WhatsApp, Instagram DM, Messenger) con pipeline de IA completo y escalamiento a humano.',
+        'Construí el loop de tool use con presupuesto USD por conversación y router LLM multi-proveedor con circuit breaker y fallback.',
         'Implementé cache semántico + exacto proyectando ~30% de ahorro en costo LLM por conversación.',
-        'Configuré subagentes custom (db-migrations, prompt-reviewer), MCP servers y flujo spec-driven.',
+        'Configuré subagentes custom (db-migrations, prompt-reviewer), MCP servers y flujo spec-driven; 295 tests verdes.',
+      ],
+    },
+    {
+      name: 'CV Harness — harness event-driven de búsqueda de empleo con IA',
+      summary:
+        'Arquitecto y desarrollador de un harness event-driven de punta a punta que detecta vacantes, las puntúa con IA y genera una HV + carta personalizadas, EN PRODUCCIÓN sobre infraestructura propia. Pipeline cron → dispatcher → scraper en Rust (Redis Streams, consumer group) → ingesta con dedup por fingerprint → normalización IA → match híbrido (IA + similitud semántica en pgvector) → generación de HV → notificación, todo por colas idempotentes. Medidor ATS determinístico 0-100, generación de PDF en el navegador con texto seleccionable y editor tipo Canva.',
+      stack: [
+        'NestJS 11',
+        'Rust',
+        'PostgreSQL 16 + pgvector',
+        'Prisma 6',
+        'Redis Streams',
+        'BullMQ',
+        'DeepSeek',
+        'Groq',
+        'OpenAI Embeddings',
+        'Next.js',
+        'Docker',
+      ],
+      visibility: 'private',
+      highlights: [
+        'Pipeline event-driven con worker stateless en Rust y dedup por sha256(url); 141 tests del API.',
+        'Match híbrido: final = 0.65 · análisis IA + 0.35 · similitud semántica (pgvector).',
+        'Medidor ATS determinístico (0-100) y modo ATS con encabezados estándar para pasar filtros automáticos.',
+        'PDF en el navegador con texto seleccionable, editor tipo Canva y facets canónicos de modalidad/seniority.',
       ],
     },
     {
@@ -222,6 +250,8 @@ Usuario avanzado de Claude Code y del ecosistema Anthropic; construyo mis proyec
     { category: 'IA & LLMs', name: 'Prompt caching', rating: 4, knowledge: 'cache_control ephemeral, caché por niveles con hit rate tracking.' },
     { category: 'IA & LLMs', name: 'Streaming (LLM)', rating: 3, knowledge: 'Base en WebSockets bidireccionales; streaming planificado en Atiende.' },
     { category: 'IA & LLMs', name: 'Agent architecture', rating: 4, knowledge: 'Tool use loop, presupuesto USD/conversación, feature flags por tool.' },
+    { category: 'IA & LLMs', name: 'LLM Router / Circuit Breaker', rating: 4, knowledge: 'Router multi-proveedor con fallback automático (Atiende + CV Harness).' },
+    { category: 'IA & LLMs', name: 'DeepSeek / Groq APIs', rating: 4, knowledge: 'APIs compatibles con OpenAI; DeepSeek en CV Harness, Groq en Atiende.' },
     // ── Backend ───────────────────────────────────────────────
     { category: 'Backend', name: 'TypeScript', rating: 5, knowledge: 'Lenguaje principal; strict mode, discriminated unions, Zod.' },
     { category: 'Backend', name: 'Node.js', rating: 5, knowledge: 'Runtime principal; streams, event loop, graceful shutdown.' },
@@ -232,7 +262,8 @@ Usuario avanzado de Claude Code y del ecosistema Anthropic; construyo mis proyec
     { category: 'Backend', name: 'Webhooks', rating: 4, knowledge: 'Verificación HMAC (Meta), callbacks de estado, idempotencia.' },
     { category: 'Backend', name: 'Cron jobs / Job scheduling', rating: 4, knowledge: 'BullMQ repeatable, backoff exponencial, concurrencia por cola.' },
     { category: 'Backend', name: 'Hexagonal Architecture / Adapter', rating: 4, knowledge: 'Atiende full hexagonal: core puro + adapters intercambiables.' },
-    { category: 'Backend', name: 'Event-driven architecture', rating: 4, knowledge: 'RabbitMQ topic exchanges (12+ microservicios), BullMQ (Atiende).' },
+    { category: 'Backend', name: 'Event-driven architecture', rating: 4, knowledge: 'RabbitMQ topic exchanges (12+ microservicios), BullMQ (Atiende), Redis Streams (CV Harness).' },
+    { category: 'Backend', name: 'Redis Streams', rating: 3, knowledge: 'Puente Nest ⇄ Rust con consumer groups (CV Harness).' },
     { category: 'Backend', name: 'Authentication (JWT, OAuth)', rating: 4, knowledge: 'JWT + refresh, OAuth Google/Facebook, RBAC.' },
     { category: 'Backend', name: 'Zod', rating: 4, knowledge: 'Validación de env fail-fast y schemas de entrada.' },
     { category: 'Backend', name: 'Rust', rating: 3, knowledge: 'Scraping con tokio/reqwest/scraper, streams Redis, concurrencia.' },

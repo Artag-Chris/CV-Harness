@@ -29,6 +29,14 @@ export class ProfileScheduleDto {
   scheduleMinutes?: number | null;
 }
 
+export class ImportProfileResumeDto {
+  @ApiProperty({
+    description:
+      'HV en markdown o texto. La IA la parsea a datos estructurados del perfil (experiencias, proyectos, skills…).',
+  })
+  content: string;
+}
+
 export class ResumeTextDto {
   @ApiProperty()
   profileId: string;

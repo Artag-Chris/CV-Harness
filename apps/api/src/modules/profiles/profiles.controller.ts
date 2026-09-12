@@ -11,10 +11,11 @@ import {
   Put,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { ProfileScheduleDto } from '../../common/api-dto';
+import { ProfileScheduleDto, ImportProfileResumeDto } from '../../common/api-dto';
 import { PrismaService } from '../../common/prisma.service';
 import { DispatchService } from '../scheduler/dispatch.service';
 import { ProfileBackfillService } from './profile-backfill.service';
+import { ProfileImportService } from './profile-import.service';
 
 /** Campos editables de un perfil desde el dashboard. */
 interface UpdateProfileBody {
@@ -31,6 +32,7 @@ export class ProfilesController {
     private readonly prisma: PrismaService,
     private readonly dispatch: DispatchService,
     private readonly backfill: ProfileBackfillService,
+    private readonly profileImport: ProfileImportService,
   ) {}
 
   @Post()
@@ -135,6 +137,19 @@ export class ProfilesController {
     if (!profile) throw new NotFoundException(`Profile ${id} no existe`);
     const result = await this.backfill.enqueueForProfile(id);
     return { ok: true, ...result };
+  }
+
+  /**
+   * Importa una HV (markdown/texto) al perfil ESTRUCTURADO con IA. Hace falta
+   * porque `POST /resumes/text` solo indexa el texto para el match semántico:
+   * la HV que redacta la IA se arma del perfil (experiencias, proyectos, skills).
+   */
+  @Post(':id/import-resume')
+  async importResume(@Param('id') id: string, @Body() body: ImportProfileResumeDto) {
+    if (!body.content?.trim()) {
+      throw new BadRequestException('content es requerido');
+    }
+    return this.profileImport.importFromMarkdown(id, body.content);
   }
 
   /** Reemplaza los sitios guardados que vigila el perfil. */

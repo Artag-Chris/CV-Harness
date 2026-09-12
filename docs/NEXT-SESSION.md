@@ -3,6 +3,29 @@
 > Estado: 2026-09-12. Proyecto **cv-harness** + pestaña **CV Harness** en el
 > front `dashboard/` (hermano de atiende).
 
+## HV POTENCIADA + IMPORT MD→PERFIL CON IA (2026-09-12, 2ª parte)
+- **HV reescrita** (`Christian_Henao_AI_Engineer_CV.md`): atiende y CV Harness como
+  productos **EN PRODUCCIÓN**, Finova cerrada en **Ago 2026** (ya no "Presente"),
+  detalle técnico (Rust, Redis Streams, pgvector, medidor ATS, patrón adaptador).
+  También se actualizaron `Christian_Henao_Proyectos_y_Skills.md` (CV Harness como
+  Project 2, renumerado; Atiende marcado como producción) y el seed
+  `apps/api/prisma/seed/profiles.data.ts` (perfil canónico alineado).
+- **Endpoint nuevo `POST /profiles/:id/import-resume`**
+  (`modules/profiles/profile-import.service.ts`): la IA parsea el markdown a JSON y
+  hace upsert de experiencias, educación, proyectos, skills y enlaces del perfil.
+  **Por qué existe**: `POST /resumes/text` solo indexa el texto para el match
+  semántico, pero la HV que redacta la IA se arma del **perfil estructurado**
+  (`buildProfileSnapshot`); sin esto, pegar el MD no llenaba la HV generada.
+  **Garantía anti-pérdida**: cada sección se reemplaza SOLO si el parseo trae
+  datos, así un parseo parcial no vacía el perfil. Sin proveedor LLM →
+  `applied:false` con aviso (no toca la BD).
+- **Dashboard**: botón **«Importar al perfil (IA)»** junto a «Indexar texto
+  (match)» en Perfiles & CV, mostrando los conteos del import.
+- **Tests**: +6 (`profile-import`) → **147 en total**. `vitest`, `nest build` y
+  `tsc --noEmit` del dashboard verdes.
+- **Flujo recomendado**: pegar la HV → «Importar al perfil (IA)» → revisar datos →
+  «Re-evaluar vacantes». Requiere `DEEPSEEK_API_KEY` (o `LLM_PROVIDER`).
+
 ## FILTROS DE VACANTES CON FACETS CANÓNICOS + README PORTAFOLIO (2026-09-12)
 - **Problema**: `Vacancy.modality` era texto libre ("Híbrido / Remoto", "100%
   remoto", "on-site") y no había filtro; además el extractor determinístico
