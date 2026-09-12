@@ -116,7 +116,15 @@ export class ResumeService {
     const resume = await this.prisma.resumeDraft.upsert({
       where: { vacancyId_profileId: { vacancyId, profileId } },
       update: {
-        content: { ...content, markdown, language, ...coverLetterFields } as Prisma.InputJsonValue,
+        // El Modo ATS es preferencia del borrador: regenerar la HV no debe
+        // apagarlo (la respuesta de la IA no lo trae y se perdía en silencio).
+        content: {
+          ...content,
+          markdown,
+          language,
+          ...(previous.atsMode ? { atsMode: true } : {}),
+          ...coverLetterFields,
+        } as Prisma.InputJsonValue,
         version: { increment: 1 },
       },
       create: {

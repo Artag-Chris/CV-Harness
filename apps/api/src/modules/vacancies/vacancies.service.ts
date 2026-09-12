@@ -201,7 +201,10 @@ export class VacanciesService {
       'default',
       { vacancyId: id, profileId: target },
       {
-        jobId: `resume-${id}-${target}`,
+        // Id único por pedido: con un `jobId` fijo, BullMQ descarta el encolado
+        // mientras el anterior siga retenido (`removeOnComplete` = 24 h) y el
+        // usuario veía que «regenerar la HV» no hacía nada.
+        jobId: `resume-${id}-${target}-${Date.now()}`,
         attempts: 4,
         backoff: { type: 'exponential' as const, delay: 3000 },
         removeOnComplete: { age: 86400, count: 1000 },

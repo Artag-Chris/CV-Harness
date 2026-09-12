@@ -274,7 +274,11 @@ export class ProfileImportService {
 
     const result: ProfileImportResult = {
       applied: true,
-      note: 'Perfil actualizado desde el markdown. Revisá los datos y, si cambió la HV, usá «Re-evaluar vacantes».',
+      // Ojo: las HV ya generadas son una copia del perfil en ese momento y NO se
+      // reescriben solas. Decir «Re-evaluar vacantes» acá mandaba al usuario a un
+      // botón que no toca los borradores existentes (solo matchea los que nunca
+      // fueron evaluados).
+      note: 'Perfil actualizado desde el markdown. Las HV ya generadas NO se reescriben: entrá a la vacante y usá «Regenerar HV» para rehacerla con el perfil nuevo.',
       counts: {
         experiences: data.experiences.length,
         education: data.education.length,

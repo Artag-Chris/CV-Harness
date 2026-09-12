@@ -56,6 +56,35 @@ Medido contra la API real:
   (`retryAttempts: 3`, `retryDelayMs: 2500`, backoff ×2) y `maxPages: 1` en la plantilla.
 - `diagnoseBlock` ahora explica también `500/502/504` como fallo transitorio del portal.
 
+## IMPORTAR CV Y REGENERAR LA HV (2026-09-12, 6ª parte)
+Pedido: «le di importar a la IA y siguió diciendo que trabajo en Finova; ¿no guardó en la
+BD o hay pasos adicionales?».
+- **No era la BD**: `POST /profiles/:id/import-resume` **sí** escribe (reemplaza
+  experiencias/formación/proyectos/skills/enlaces y los escalares del perfil). Regla
+  anti-pérdida: cada sección se reemplaza solo si el parseo trae elementos.
+- **La causa**: la HV generada es una **copia del perfil en ese momento**. El import no
+  reescribe los borradores ya generados, y «Re-evaluar vacantes» (backfill) **solo
+  matchea vacantes sin `VacancyProfile`** → no toca las ya evaluadas. La nota del import
+  mandaba justo a ese botón: **instrucción equivocada**, corregida.
+- **Faltaba el paso**: no existía forma de rehacer una HV existente desde el perfil.
+  Ahora la ficha de la vacante tiene **«Regenerar HV»** (con confirmación: pisa el texto
+  del CV, conserva la carta) → `POST /vacancies/:id/generate-resume`.
+- **Bug de fondo (por eso "no pasaba nada")**: el encolado manual usaba `jobId` fijo
+  (`resume-{id}-{perfil}`) y `removeOnComplete { age: 86400 }` → **BullMQ descartaba el
+  segundo encolado** en 24 h. Ahora el id lleva timestamp (`+2 tests`).
+- **Bug de la misma familia**: el upsert de la etapa resume armaba el contenido desde la
+  respuesta de la IA y **apagaba `atsMode`** al regenerar → rescatado (+1 test).
+- **UI**: el panel resincroniza el texto cuando cambia `version` del borrador (ajuste
+  durante el render, no efecto; si hay ediciones locales sin guardar, ganan las locales y
+  no se remonta para no cerrar el pop-out). `version` se pasa desde la ficha y desde Pegar.
+- **Ojo (gotcha real)**: la HV base nueva que se pega queda **inactiva** (`Resume.active`
+  = false por defecto) hasta apretar «Activar» en Perfiles & CV; el **match semántico**
+  sigue usando la anterior hasta entonces.
+- Pendiente posible: que «Re-evaluar vacantes» pueda **forzar** el re-match de vacantes ya
+  evaluadas (hoy el import de un CV nuevo no re-puntúa lo viejo).
+- Verificación: API **202 tests** (28 archivos) + `nest build`; dashboard `tsc` 0 +
+  `next build` OK.
+
 ## MODO ATS: GUARDARLO Y DESCARGARLO (2026-09-12, 5ª parte)
 Pedido: «la IA me organizó el currículum pero no veo dónde descargarlo con lo nuevo
 que me arregló la IA para pasar el filtro ATS».

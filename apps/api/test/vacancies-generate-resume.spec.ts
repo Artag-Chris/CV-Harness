@@ -46,8 +46,24 @@ describe('VacanciesService.enqueueResume', () => {
     const res = await service.enqueueResume('v1', 'p1');
 
     expect(res).toMatchObject({ ok: true, queued: true, profileId: 'p1' });
-    expect(queued[0].opts.jobId).toBe('resume-v1-p1');
+    expect(queued[0].opts.jobId).toMatch(/^resume-v1-p1-\d+$/);
     expect(queued[0].data).toEqual({ vacancyId: 'v1', profileId: 'p1' });
+  });
+
+  /**
+   * Regresión: con un `jobId` fijo, BullMQ descarta el segundo encolado mientras
+   * el job anterior siga retenido (`removeOnComplete` = 24 h), así que «regenerar
+   * la HV» no hacía nada y parecía que el cambio de perfil no se guardaba.
+   */
+  it('un segundo pedido de regeneración no se descarta por dedup', async () => {
+    const { service, queued } = makeService({ match: { id: 'm1' }, profileVp: { profileId: 'p1' } });
+
+    await service.enqueueResume('v1', 'p1');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await service.enqueueResume('v1', 'p1');
+
+    expect(queued).toHaveLength(2);
+    expect(queued[0].opts.jobId).not.toBe(queued[1].opts.jobId);
   });
 
   it('rechaza si todavía no hay análisis de encaje', async () => {

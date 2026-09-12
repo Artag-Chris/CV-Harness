@@ -23,7 +23,11 @@ const CONTENT = {
   keywords: ['node'],
 };
 
-function makeService(raw: Record<string, unknown>, coverFails = false) {
+function makeService(
+  raw: Record<string, unknown>,
+  coverFails = false,
+  existingDraft: { content: Record<string, unknown> } | null = null,
+) {
   const draftSaves: unknown[] = [];
   const letterCalls: string[] = [];
   const prisma = {
@@ -47,7 +51,7 @@ function makeService(raw: Record<string, unknown>, coverFails = false) {
       findUnique: () => Promise.resolve({ score: 80, applicationStrategy: {}, coverLetterDraft: null }),
     },
     resumeDraft: {
-      findUnique: () => Promise.resolve(null),
+      findUnique: () => Promise.resolve(existingDraft),
       upsert: (args: unknown) => {
         draftSaves.push(args);
         return Promise.resolve({ id: 'd1' });
@@ -95,5 +99,23 @@ describe('ResumeService — carta automática de las ofertas pegadas', () => {
 
     await expect(service.handle('v1', 'p1')).resolves.toBeUndefined();
     expect(draftSaves).toHaveLength(1);
+  });
+
+  /**
+   * Regresión: al regenerar, el contenido se armaba desde la respuesta de la IA,
+   * que no trae las preferencias del borrador — el Modo ATS se apagaba solo y la
+   * HV volvía a la plantilla de dos columnas.
+   */
+  it('regenerar conserva el Modo ATS y la carta ya escrita', async () => {
+    const existing = {
+      content: { ...CONTENT, atsMode: true, coverLetter: 'Carta previa.' },
+    };
+    const { service, draftSaves } = makeService({}, false, existing);
+
+    await service.handle('v1', 'p1');
+
+    const args = draftSaves[0] as { update: { content: Record<string, unknown> } };
+    expect(args.update.content.atsMode).toBe(true);
+    expect(args.update.content.coverLetter).toBe('Carta previa.');
   });
 });
