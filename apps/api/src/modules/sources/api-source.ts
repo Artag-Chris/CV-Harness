@@ -40,6 +40,12 @@ export const ApiSourceSpecSchema = z.object({
     description: z.string().trim().min(1).optional(),
     applyUrl: z.string().trim().min(1).optional(),
     externalId: z.string().trim().min(1).optional(),
+    /**
+     * Portal donde está publicado el aviso original. Los agregadores (Jooble)
+     * lo devuelven en un campo propio: saber que la vacante vive en otro sitio
+     * es lo que evita buscar a ciegas.
+     */
+    originSource: z.string().trim().min(1).optional(),
   }),
 });
 
@@ -56,6 +62,7 @@ export interface ApiSourceItem {
   postedAt?: string | null;
   descriptionText?: string | null;
   applyUrl?: string | null;
+  originSource?: string | null;
 }
 
 export interface ApiRequestParts {
@@ -223,6 +230,9 @@ export function mapApiItems(
       applyUrl: spec.mapping.applyUrl
         ? absoluteUrl(asText(readPath(row, spec.mapping.applyUrl)), baseUrl)
         : url,
+      originSource: spec.mapping.originSource
+        ? asText(readPath(row, spec.mapping.originSource))
+        : null,
     });
   }
   return { items, skipped };

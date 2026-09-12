@@ -134,6 +134,43 @@ describe('mapeo de items', () => {
     expect(skipped).toBe(2);
   });
 
+  it('guarda el portal de origen que informa el agregador', () => {
+    // Jooble devuelve `source: "fitly.work"`: la vacante está publicada en OTRO
+    // sitio, y sin ese dato hay que buscarla a ciegas.
+    const parsed = parseApiSpec({
+      api: {
+        url: 'https://jooble.org/api/{key}',
+        mapping: { title: 'title', url: 'link', originSource: 'source' },
+      },
+    });
+    if (!parsed.ok) throw new Error('spec inválida');
+    const { items } = mapApiItems(
+      [
+        {
+          title: 'Full Stack Developer',
+          link: 'https://jooble.org/away/1',
+          source: 'fitly.work',
+        },
+      ],
+      parsed.spec,
+      'https://jooble.org',
+    );
+    expect(items[0].originSource).toBe('fitly.work');
+  });
+
+  it('deja originSource en null si la spec no lo mapea', () => {
+    const parsed = parseApiSpec({
+      api: { url: 'https://x.com/a', mapping: { title: 't', url: 'u' } },
+    });
+    if (!parsed.ok) throw new Error('spec inválida');
+    const { items } = mapApiItems(
+      [{ t: 'A', u: 'https://x.com/1', source: 'irrelevante' }],
+      parsed.spec,
+      'https://x.com',
+    );
+    expect(items[0].originSource).toBeNull();
+  });
+
   it('acepta campos anidados tipo { name } y arrays de texto', () => {
     const parsed = parseApiSpec({
       api: {

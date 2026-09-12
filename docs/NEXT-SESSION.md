@@ -56,6 +56,42 @@ Medido contra la API real:
   (`retryAttempts: 3`, `retryDelayMs: 2500`, backoff ×2) y `maxPages: 1` en la plantilla.
 - `diagnoseBlock` ahora explica también `500/502/504` como fallo transitorio del portal.
 
+## URL DEL AVISO Y PORTAL DE ORIGEN (2026-09-12, 4ª parte)
+Pedido: «necesito la url de los trabajos para saber dónde está la vacante». La ficha
+solo tenía el botón "Aplicar ↗"; no se veía a dónde iba ni en qué portal vivía el aviso.
+- **Medido con la API real**: cada job de Jooble trae `source` (`fitly.work`,
+  `grabjobs.co`, `us.experteer.com`…) — es un **agregador**, la vacante está publicada
+  en otro sitio. También devuelve `type` (Full-time) que hoy no se mapea.
+- **Medido**: los links de Jooble vienen en DOS formas, `jooble.org/away/…` y
+  `jooble.org/desc/…`, y **desde el servidor dan 403** (Cloudflare). Desde el navegador
+  del usuario sí se resuelven → el enlace hay que darlo, no resolverlo nosotros.
+- **Item**: nuevo campo opcional `originSource` (`api-source.ts` schema + mapeo,
+  `ScraperItemSchema`, `raw.originSource` en la ingesta). Jooble: `originSource: 'source'`.
+- **Dashboard** (`cv/vacantes/[id]`): bloque **«Dónde está publicada»** con la URL en
+  texto seleccionable, **Copiar URL**, «Abrir el aviso ↗» y el aviso de que es un enlace
+  de agregador; muestra el portal de origen cuando existe.
+- **Vale para todos los portales** (pedido: «lo mismo para computrabajo y todo eso»):
+  la URL no es específica de Jooble. En el motor Rust (`engine.rs:171-194`) el `url` del
+  item sale del **ancla de la tarjeta** (`selectors.applyUrl` → `first_href`), así que en
+  Computrabajo es la URL real del aviso; en la API es `mapping.url`. El bloque de la ficha
+  y el botón del listado leen esa misma URL, sea cual sea el `kind`.
+- **Listado** (`cv/vacantes`): botón **«Aplicar ↗»** por fila (con la URL en el tooltip),
+  para postular sin entrar a la ficha. La fila se reestructuró (Link interno + enlace
+  externo hermano) para no anidar `<a>`.
+- **Nuance conocida**: si una receta no logra el href del item, el motor cae a
+  **`list_url`** (`engine.rs:185`), o sea la URL del listado y no la del aviso. Con las
+  recetas actuales (`applyUrl` definido) no pasa; si algún portal lo hiciera, el texto de
+  la ficha lo delata (se ve la URL del buscador).
+- **Ojo**: `originSource` solo aparece en vacantes **nuevas** (el dedup por `sha256(url)`
+  no re-escribe las existentes); la **URL sí** está en todas porque `raw.applyUrl` ya se
+  guardaba desde el principio.
+- Verificación: API `nest build` + **197 tests** (28 archivos; +2 del mapeo), dashboard
+  `tsc` + `next build` OK. Medición real: **20/20 items** con `originSource`.
+
+## URL DEL AVISO (arranque de la sesión siguiente)
+Nada pendiente de este pedido. Si se quiere ir más allá: guardar también `type` de Jooble
+y/o re-escribir `raw` en el dedup para las vacantes ya ingeridas.
+
 ## SELECTOR DE IDIOMA (PERFIL + POR HV) (2026-09-12, 3ª parte)
 - **Modelo**: `Profile.applyLanguage String @default("auto")` (migración
   `20260912010000_profile_apply_language`) y `content.language` por borrador

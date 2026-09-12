@@ -153,6 +153,8 @@ export class IngestionService {
             externalId: item.externalId ?? url,
             company: item.company ?? null,
             location: item.location ?? null,
+            // Con agregadores, acá queda el portal donde vive el aviso real.
+            originSource: item.originSource ?? null,
           } as Prisma.InputJsonValue,
         },
       });

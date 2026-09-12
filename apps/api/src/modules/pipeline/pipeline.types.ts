@@ -16,6 +16,8 @@ export const ScraperItemSchema = z.object({
   descriptionText: z.string().optional().nullable(),
   descriptionHtml: z.string().optional().nullable(),
   applyUrl: z.string().optional().nullable(),
+  /** Portal de origen cuando el item viene de un agregador (ej. Jooble → "fitly.work"). */
+  originSource: z.string().optional().nullable(),
 });
 
 export const ScraperResultPayloadSchema = z.object({

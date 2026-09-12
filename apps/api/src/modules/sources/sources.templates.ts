@@ -83,6 +83,9 @@ export const SOURCE_TEMPLATES: SourceTemplate[] = [
           postedAt: 'updated',
           description: 'snippet',
           externalId: 'id',
+          // Jooble es un agregador: `source` dice en qué portal vive el aviso
+          // real ("fitly.work"), que es lo que el usuario necesita para aplicar.
+          originSource: 'source',
         },
       },
     },
