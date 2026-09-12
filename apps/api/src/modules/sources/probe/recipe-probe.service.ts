@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import * as cheerio from 'cheerio';
 import type { Element } from 'domhandler';
 import { env } from '../../../config/env';
@@ -52,7 +52,7 @@ export class RecipeProbeService {
   ) {}
 
   async probe(listUrl: string): Promise<ProbeResult> {
-    const page = await fetchPage(listUrl);
+    const page = await this.fetchOrExplain(listUrl);
     const baseUrl = originOf(page.finalUrl) || originOf(listUrl);
     const warnings: string[] = [];
     const alternatives: ProbeResult['diagnostics']['alternatives'] = [];
@@ -201,6 +201,21 @@ export class RecipeProbeService {
     };
   }
 
+  /**
+   * El probe solo sabe de HTML. Si el portal tiene API oficial, el error de
+   * challenge deja al usuario sin salida: en ese caso se le dice qué plantilla
+   * usar en vez de dejarlo probando User-Agents.
+   */
+  private async fetchOrExplain(listUrl: string) {
+    try {
+      return await fetchPage(listUrl);
+    } catch (err) {
+      const hint = apiTemplateHint(listUrl);
+      if (!hint || !(err instanceof BadRequestException)) throw err;
+      throw new BadRequestException(`${err.message} ${hint}`);
+    }
+  }
+
   /** Pide a la IA selectores, usando el HTML real de una tarjeta como muestra. */
   private async suggestWithAi(
     html: string,
@@ -284,4 +299,23 @@ function defaultLimits(): Record<string, unknown> {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     respectRobots: true,
   };
+}
+
+/**
+ * ¿Esta URL es de un portal con API oficial? Devuelve el mensaje que manda al
+ * usuario a la plantilla correcta: el probe de HTML nunca va a funcionar ahí
+ * (el WAF responde con challenge a cualquier cliente que no sea un navegador).
+ */
+export function apiTemplateHint(listUrl: string): string | null {
+  let host: string;
+  try {
+    host = new URL(listUrl).hostname;
+  } catch {
+    return null;
+  }
+  const template = SOURCE_TEMPLATES.find(
+    (tpl) => tpl.kind === 'API_JSON' && tpl.baseUrlDefault.includes(host),
+  );
+  if (!template) return null;
+  return `Este portal tiene API oficial: elegí la plantilla «${template.label}» en el selector de plantilla y guardá — no hace falta «Analizar URL».`;
 }

@@ -42,3 +42,64 @@ describe('SourcesService.create — validación de receta', () => {
     ).rejects.not.toBeInstanceOf(BadRequestException);
   });
 });
+
+/** Prisma mínimo que captura lo que se intenta escribir. */
+function makeService() {
+  const writes: Record<string, unknown>[] = [];
+  const prisma = {
+    source: {
+      create: (args: { data: Record<string, unknown> }) => {
+        writes.push(args.data);
+        return Promise.resolve({ id: 's1', ...args.data });
+      },
+    },
+  };
+  return { service: new SourcesService(prisma as never), writes };
+}
+
+describe('SourcesService.create — fuentes por API oficial', () => {
+  /**
+   * El flujo real del dashboard: el usuario elige la plantilla "Jooble" en el
+   * selector y guarda. El `kind` sale de la plantilla, no del body.
+   */
+  it('crea una fuente API_JSON desde la plantilla de Jooble', async () => {
+    const { service, writes } = makeService();
+    await service.create({
+      name: 'Jooble desarrollador',
+      listUrl: 'https://co.jooble.org/SearchResult?ukw=desarrollador',
+      templateId: 'jooble-api',
+    });
+
+    expect(writes[0].kind).toBe('API_JSON');
+    const selectors = writes[0].selectors as { api: { url: string; authEnv: string } };
+    expect(selectors.api.url).toBe('https://jooble.org/api/{key}');
+    expect(selectors.api.authEnv).toBe('JOOBLE_API_KEY');
+    // Hereda los límites de la plantilla: 1 página y reintentos contra el WAF.
+    const limits = writes[0].limits as { maxPages: number; retryAttempts: number };
+    expect(limits.maxPages).toBe(1);
+    expect(limits.retryAttempts).toBe(3);
+  });
+
+  it('acepta una spec de API explícita (editor del dashboard)', async () => {
+    const { service, writes } = makeService();
+    await service.create({
+      name: 'Otra API',
+      listUrl: 'https://x.com/ofertas',
+      kind: 'API_JSON',
+      selectors: { api: { url: 'https://x.com/jobs', mapping: { title: 't', url: 'u' } } },
+    });
+    expect(writes[0].kind).toBe('API_JSON');
+  });
+
+  it('rechaza una fuente API con receta CSS (kind y receta no coinciden)', async () => {
+    const { service } = makeService();
+    await expect(
+      service.create({
+        name: 'Rota',
+        listUrl: 'https://x.com/ofertas',
+        kind: 'API_JSON',
+        selectors: { item: '.job', title: 'h2 a' },
+      }),
+    ).rejects.toThrow(/api/i);
+  });
+});
