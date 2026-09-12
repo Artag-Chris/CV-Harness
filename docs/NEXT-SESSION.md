@@ -56,6 +56,28 @@ Medido contra la API real:
   (`retryAttempts: 3`, `retryDelayMs: 2500`, backoff ×2) y `maxPages: 1` en la plantilla.
 - `diagnoseBlock` ahora explica también `500/502/504` como fallo transitorio del portal.
 
+## URLs DE APLICACIÓN RELATIVAS (2026-09-12, 7ª parte)
+Pedido: en la ficha, «Abrir el aviso» mostraba
+`/ofertas-de-trabajo/oferta-…-108A86F64302801261373E686DCF3405#lc=…` (sin dominio), así
+que no abría; quería el portal + la ruta para que llevara directo, en todos los portales.
+- **Causa raíz**: los listados HTML entregan el href **relativo** y el scraper lo guardaba
+  crudo en `apply_url` (`engine.rs`: `apply_url: href.clone()`). El `url` de la vacante sí
+  salía absolutizado (`absolute_url()`), pero la UI prefiere `raw.applyUrl` → se veía la
+  ruta pelada. Computrabajo, Jooble, etc. no tienen nada especial: pasa con cualquier
+  portal que use hrefs relativos.
+- **Scraper**: `apply_url` ahora es el mismo href absolutizado y sin fragmento de tracking
+  (`apply_url: url.clone()`), así lo que entra a la BD ya es usable (+1 test del HTML real
+  de Computrabajo).
+- **API (lo que arregla lo YA guardado)**: `resolveApplyUrl()` en `vacancies.service`
+  resuelve el href contra `source.baseUrl` (o el origen de `listUrl` si falta) y expone
+  **`applyUrl`** en detalle y listado; si no se puede resolver, cae al `url` de la vacante.
+  Hubo que sumar `baseUrl`/`listUrl` al include del listado (±4 tests).
+- **Dashboard**: ficha y listado usan `applyUrl` (con fallback a `raw.applyUrl`/`url` por
+  si hay respuesta vieja en caché). `apps/web` (legacy, fuera del compose) sigue leyendo
+  `raw.applyUrl`, que ahora llega absolutizado desde Rust.
+- Verificación: API **206 tests** (28 archivos) + `nest build`; scraper `cargo test` 8/8;
+  dashboard `tsc` 0 + `next build` OK.
+
 ## IMPORTAR CV Y REGENERAR LA HV (2026-09-12, 6ª parte)
 Pedido: «le di importar a la IA y siguió diciendo que trabajo en Finova; ¿no guardó en la
 BD o hay pasos adicionales?».

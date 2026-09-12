@@ -147,6 +147,61 @@ describe('VacanciesService.get — detalle por perfil', () => {
       { profileId: 'p-juan', score: 40, status: 'APPLIED' },
     ]);
   });
+
+  function makeServiceForRow(row: Record<string, unknown>) {
+    const prisma = { vacancy: { findUnique: () => Promise.resolve(row) } };
+    return new VacanciesService(prisma as never);
+  }
+
+  /**
+   * Regresión: Computrabajo entrega el href del aviso relativo
+   * (`/ofertas-de-trabajo/…`) y el scraper lo guardaba crudo en `raw.applyUrl`,
+   * así que «Abrir el aviso» no abría nada. El API lo absolutiza contra el portal.
+   */
+  it('resuelve el href relativo del aviso contra la baseUrl de la fuente', async () => {
+    const detail = await makeServiceForRow({
+      ...detailRow,
+      source: { id: 's1', name: 'Computrabajo', baseUrl: 'https://co.computrabajo.com', listUrl: 'https://co.computrabajo.com/trabajo-de-dev' },
+      url: 'https://co.computrabajo.com/ofertas-de-trabajo/oferta-1',
+      raw: { applyUrl: '/ofertas-de-trabajo/oferta-1#lc=ListOffers-Score4-16' },
+    }).get('v1');
+
+    expect(detail.applyUrl).toBe(
+      'https://co.computrabajo.com/ofertas-de-trabajo/oferta-1#lc=ListOffers-Score4-16',
+    );
+  });
+
+  it('sin baseUrl toma el host del listUrl de la fuente', async () => {
+    const detail = await makeServiceForRow({
+      ...detailRow,
+      source: { id: 's1', name: 'Computrabajo', baseUrl: null, listUrl: 'https://co.computrabajo.com/trabajo-de-dev' },
+      url: 'https://co.computrabajo.com/ofertas-de-trabajo/oferta-2',
+      raw: { applyUrl: '/ofertas-de-trabajo/oferta-2' },
+    }).get('v1');
+
+    expect(detail.applyUrl).toBe('https://co.computrabajo.com/ofertas-de-trabajo/oferta-2');
+  });
+
+  it('si el href no se puede resolver usa la url de la vacante', async () => {
+    const detail = await makeServiceForRow({
+      ...detailRow,
+      source: { id: 's1', name: 'Manual', baseUrl: null, listUrl: '' },
+      url: 'https://ejemplo.com/aviso/3',
+      raw: { applyUrl: '/relativo-sin-base' },
+    }).get('v1');
+
+    expect(detail.applyUrl).toBe('https://ejemplo.com/aviso/3');
+  });
+
+  it('un aviso ya absoluto se deja igual', async () => {
+    const detail = await makeServiceForRow({
+      ...detailRow,
+      url: 'https://fitly.work/jobs/9',
+      raw: { applyUrl: 'https://fitly.work/jobs/9' },
+    }).get('v1');
+
+    expect(detail.applyUrl).toBe('https://fitly.work/jobs/9');
+  });
 });
 
 describe('VacanciesService.list — filtros de facets', () => {

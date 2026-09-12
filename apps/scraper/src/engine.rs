@@ -191,7 +191,9 @@ fn extract_item(
         posted_at: parsed.posted_at.as_ref().and_then(|s| first_text(item, s)),
         description_text: desc_html.as_deref().map(html_to_text).filter(|t| !t.is_empty()),
         description_html: desc_html.clone(),
-        apply_url: href.clone(),
+        // El href del aviso, ya absolutizado contra el portal: los listados lo
+        // entregan relativo (`/ofertas-de-trabajo/…`) y así no abre desde la ficha.
+        apply_url: url.clone(),
     })
 }
 

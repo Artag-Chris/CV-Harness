@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Prisma, VacancyProfileStatus, VacancyStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { PrismaService } from '../../common/prisma.service';
+import { absoluteUrl, hasScheme, originOf } from '../../common/url.util';
 import type { ModalityType, SeniorityLevel } from '../../common/job-facets';
 import { queueName, QUEUES } from '../../config/queue.config';
 import { recomputeVacancyAggregate } from './aggregate';
@@ -34,7 +35,8 @@ const ALLOWED_STATUS: VacancyStatus[] = [
 ];
 
 const vacancyListInclude = {
-  source: { select: { id: true, name: true, kind: true } },
+  // baseUrl/listUrl: para absolutizar los hrefs relativos que guarda el scraper.
+  source: { select: { id: true, name: true, kind: true, baseUrl: true, listUrl: true } },
   vacancyProfiles: {
     select: {
       id: true,
@@ -51,7 +53,7 @@ const vacancyListInclude = {
 } satisfies Prisma.VacancyInclude;
 
 const detailInclude = {
-  source: { select: { id: true, name: true, baseUrl: true, kind: true } },
+  source: { select: { id: true, name: true, baseUrl: true, listUrl: true, kind: true } },
   vacancyProfiles: {
     include: { profile: { select: { id: true, name: true } } },
   },
@@ -244,6 +246,28 @@ export class VacanciesService {
   }
 }
 
+/**
+ * URL para aplicar: el href del aviso resuelto contra el portal.
+ *
+ * Los listados HTML entregan hrefs relativos y el scraper los guarda crudos en
+ * `raw.applyUrl`; el `url` de la vacante sí viene absolutizado. Se prefiere el
+ * href del aviso (es el link real de la oferta) y se cae a `url` si no se puede
+ * resolver: sin esto el botón «Abrir el aviso» de Computrabajo quedaba en
+ * `/ofertas-de-trabajo/…` y no abría.
+ */
+function resolveApplyUrl(v: {
+  url: string;
+  raw: unknown;
+  source: { baseUrl: string | null; listUrl: string };
+}): string | null {
+  const base = v.source.baseUrl?.trim() || originOf(v.source.listUrl);
+  const rawApply = (v.raw as { applyUrl?: unknown } | null)?.applyUrl;
+  const resolved = [typeof rawApply === 'string' ? rawApply : null, v.url]
+    .map((candidate) => absoluteUrl(base, candidate))
+    .filter((url): url is string => !!url);
+  return resolved.find(hasScheme) ?? resolved[0] ?? null;
+}
+
 function mapListRow(v: ListRow, profileId?: string) {
   const profiles = v.vacancyProfiles.map((vp) => ({
     profileId: vp.profile.id,
@@ -262,6 +286,8 @@ function mapListRow(v: ListRow, profileId?: string) {
     ...v,
     // Las ofertas pegadas a mano se marcan en la UI (fuente sintética MANUAL).
     isManual: v.source.kind === 'MANUAL',
+    // Link de aplicación ya utilizable (href relativo resuelto contra el portal).
+    applyUrl: resolveApplyUrl(v),
     matchScore: best?.score ?? v.matchScore,
     match: best,
     resume: bestDraft
@@ -310,6 +336,8 @@ function mapDetail(v: DetailRow, profileId?: string) {
     matches: undefined,
     drafts: undefined,
     isManual: v.source.kind === 'MANUAL',
+    // Link de aplicación ya utilizable (href relativo resuelto contra el portal).
+    applyUrl: resolveApplyUrl(v),
     matchScore: bestMatch?.score ?? v.matchScore,
     match: bestMatch ? toPublicMatch(bestMatch) : null,
     resume: bestResume

@@ -223,6 +223,9 @@ mod tests {
             first.url,
             "https://co.computrabajo.com/ofertas-de-trabajo/oferta-de-trabajo-de-desarrollador-de-mercado-la-mesa-cundinamarca-en-la-mesa-A4F9581DF84D20E861373E686DCF3405"
         );
+        // El href del aviso también sale absoluto: antes viajaba crudo
+        // (`/ofertas-de-trabajo/…`) y el botón "Abrir el aviso" no abría nada.
+        assert_eq!(first.apply_url.as_deref(), Some(first.url.as_str()));
 
         let second = &page.items[1];
         assert_eq!(second.salary.as_deref(), Some("$ 4.000.000,00 (Mensual)"));
