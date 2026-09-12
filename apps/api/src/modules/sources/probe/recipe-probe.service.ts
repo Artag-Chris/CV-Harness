@@ -69,6 +69,9 @@ export class RecipeProbeService {
 
     // ── 1. Plantillas del portal ──────────────────────────────────────────────
     for (const tpl of SOURCE_TEMPLATES) {
+      // Las plantillas de API no proponen selectores CSS: su camino es la fuente
+      // API_JSON, no el probe de HTML.
+      if (tpl.kind === 'API_JSON') continue;
       if (!baseUrl || !tpl.baseUrlDefault.includes(new URL(baseUrl).hostname)) continue;
       const selectors = tpl.selectors as unknown as RecipeSelectors;
       const score = scoreRecipe(page.html, selectors, baseUrl);

@@ -2,6 +2,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { queueName, QUEUES } from '../../config/queue.config';
 import { NotificationModule } from '../notification/notification.module';
+import { ApiSourceModule } from '../sources/api-source.module';
 import { CrawlScheduler } from './crawl-scheduler.service';
 import { CrawlWorker } from './crawl.worker';
 import { DispatchService } from './dispatch.service';
@@ -9,6 +10,7 @@ import { DispatchService } from './dispatch.service';
 @Module({
   imports: [
     NotificationModule,
+    ApiSourceModule,
     BullModule.registerQueue({ name: queueName(QUEUES.CRAWL) }),
   ],
   providers: [CrawlScheduler, DispatchService, CrawlWorker],

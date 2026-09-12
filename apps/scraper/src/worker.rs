@@ -45,7 +45,7 @@ pub async fn run(cfg: WorkerConfig) -> anyhow::Result<()> {
     // El grupo de resultados normalmente lo crea Nest (ingest); aseguramos por robustez.
     ensure_group(&mut con, &cfg, &cfg.stream_results).await;
 
-    let http = reqwest::Client::builder().build()?;
+    let http = crate::http::build_client()?;
 
     info!(
         stream = %cfg.stream_requests,

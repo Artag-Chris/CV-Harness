@@ -1,7 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-
-const BROWSER_UA =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+import { browserHeaders, diagnoseBlock } from '../../../common/http';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const TIMEOUT_MS = 25_000;
@@ -48,7 +46,7 @@ export async function fetchPage(rawUrl: string): Promise<FetchedPage> {
   let res: Response;
   try {
     res = await fetch(url, {
-      headers: { 'User-Agent': BROWSER_UA, Accept: 'text/html,application/xhtml+xml' },
+      headers: browserHeaders(),
       redirect: 'follow',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -59,11 +57,12 @@ export async function fetchPage(rawUrl: string): Promise<FetchedPage> {
   }
 
   if (!res.ok) {
-    const hint =
-      res.status === 403 || res.status === 401
-        ? ' El sitio bloqueó la petición (WAF/anti-bot); probá otro User-Agent o no es scrapeable.'
-        : '';
-    throw new BadRequestException(`El sitio respondió HTTP ${res.status}.${hint}`);
+    // El diagnóstico distingue "WAF con challenge" de "403 por headers": sin eso
+    // el usuario termina cambiando el User-Agent para un problema que no es ese.
+    const diagnosis = diagnoseBlock(res.status, res.headers);
+    throw new BadRequestException(
+      `El sitio respondió HTTP ${res.status}.${diagnosis ? ` ${diagnosis}` : ''}`,
+    );
   }
 
   const buf = Buffer.from(await res.arrayBuffer());
@@ -74,6 +73,11 @@ export async function fetchPage(rawUrl: string): Promise<FetchedPage> {
   }
   const contentType = res.headers.get('content-type') ?? '';
   const html = buf.toString('utf8');
+  if (looksLikeChallenge(html)) {
+    throw new BadRequestException(
+      'La página devuelta es un challenge anti-bot (Cloudflare/WAF), no el listado. Este portal necesita una fuente por API/RSS oficial o con sesión de navegador.',
+    );
+  }
   if (!/<html|<body|<div|<article/i.test(html)) {
     throw new BadRequestException(
       'La respuesta no parece HTML (¿es una URL de listado? ¿requiere JavaScript?)',
@@ -87,6 +91,28 @@ export async function fetchPage(rawUrl: string): Promise<FetchedPage> {
     bytes: buf.byteLength,
     contentType,
   };
+}
+
+/**
+ * Marcadores del interstitial de un challenge (Cloudflare, Imperva, DataDome).
+ * Son cadenas específicas del challenge a propósito: "Un momento" suelto
+ * aparece en textos legítimos en español.
+ */
+const CHALLENGE_MARKERS = [
+  'challenges.cloudflare.com',
+  'cf-chl',
+  '__cf_chl',
+  'cf-browser-verification',
+  'just a moment...',
+  'un momento…',
+  '_incapsula_resource',
+  'datadome',
+];
+
+/** La respuesta es un interstitial de WAF, no el contenido del sitio. */
+export function looksLikeChallenge(html: string): boolean {
+  const lower = html.toLowerCase();
+  return CHALLENGE_MARKERS.some((marker) => lower.includes(marker));
 }
 
 /**

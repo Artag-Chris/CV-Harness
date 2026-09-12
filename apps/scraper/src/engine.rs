@@ -1,7 +1,6 @@
 //! Motor de scraping genérico: recibe la receta (selectores + límites) del
 //! stream y devuelve los ítems extraídos. No conoce ningún sitio en particular.
 
-use reqwest::header::USER_AGENT;
 use scraper::{ElementRef, Html, Selector};
 use std::time::Duration;
 use tracing::{debug, info, warn};
@@ -105,10 +104,7 @@ fn first_href(element: ElementRef<'_>, sel: &Selector) -> Option<String> {
 }
 
 async fn fetch(client: &reqwest::Client, url: &str, recipe: &Recipe) -> Result<String, String> {
-    let resp = client
-        .get(url)
-        .header(USER_AGENT, recipe.limits.user_agent.as_str())
-        .timeout(Duration::from_millis(recipe.limits.timeout_ms))
+    let resp = crate::http::get(client, url, recipe)
         .send()
         .await
         .map_err(|e| format!("GET {url} falló: {e}"))?;

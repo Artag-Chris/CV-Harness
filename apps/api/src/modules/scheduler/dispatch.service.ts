@@ -9,6 +9,9 @@ import { STREAMS } from '../../config/queue.config';
 import { REDIS } from '../../config/tokens';
 import { originOf } from '../../common/url.util';
 import { NotificationService } from '../notification/notification.service';
+import { API_SOURCE_KIND } from '../sources/api-source';
+import { ApiSourceService } from '../sources/api-source.service';
+import type { ScraperResultPayload } from '../pipeline/pipeline.types';
 
 export type CrawlJobData =
   | { type: 'cycle' }
@@ -38,6 +41,7 @@ export class DispatchService {
     private readonly prisma: PrismaService,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly notifications: NotificationService,
+    private readonly apiSource: ApiSourceService,
     private readonly logger: JsonLogger,
   ) {}
 
@@ -136,6 +140,39 @@ export class DispatchService {
       data: { sourceId: source.id, requestId },
     });
 
+    // Las fuentes de API no pasan por el worker Rust: no hay HTML que parsear y
+    // la API key no debe viajar por el stream. Se publica el resultado ya armado
+    // en `scraper:results`, así la ingesta (dedup + normalización) es idéntica.
+    if (source.kind === API_SOURCE_KIND) {
+      await this.publishApiResult(source, requestId);
+    } else {
+      await this.publishScrapeRequest(source, requestId);
+    }
+
+    const nextRunAt = new Date(
+      Date.now() + source.intervalMinutes * 60_000,
+    );
+    await this.prisma.source.update({
+      where: { id: source.id },
+      data: { lastRunAt: new Date(), nextRunAt },
+    });
+
+    this.logger.log(
+      {
+        msg: 'dispatched scrape request',
+        requestId,
+        sourceId: source.id,
+        sourceName: source.name,
+        kind: source.kind,
+        intervalMinutes: source.intervalMinutes,
+      },
+      DispatchService.name,
+    );
+    return { requestId };
+  }
+
+  /** Camino normal: el worker Rust raspa el HTML y publica el resultado. */
+  private async publishScrapeRequest(source: Source, requestId: string): Promise<void> {
     const payload: ScrapeRequestPayload = {
       schemaVersion: '1',
       requestId,
@@ -156,37 +193,62 @@ export class DispatchService {
         JSON.stringify(payload),
       );
     } catch (err) {
-      await this.prisma.scrapeRun.updateMany({
-        where: { requestId },
-        data: { status: 'FAILED', finishedAt: new Date(), error: String(err) },
-      });
-      await this.notifications.create({
-        type: 'SOURCE_ERROR',
-        title: `No se pudo despachar "${source.name}"`,
-        body: `El mensaje no llegó al scraper: ${String(err).slice(0, 200)}`,
-        payload: { sourceId: source.id },
-      });
+      await this.failDispatch(source, requestId, err);
       throw err;
     }
+  }
 
-    const nextRunAt = new Date(
-      Date.now() + source.intervalMinutes * 60_000,
-    );
-    await this.prisma.source.update({
-      where: { id: source.id },
-      data: { lastRunAt: new Date(), nextRunAt },
-    });
-
-    this.logger.log(
-      {
-        msg: 'dispatched scrape request',
+  /**
+   * Fuentes `API_JSON`: se consulta la API oficial y se publica el resultado. Un
+   * fallo de la API también se publica (con `error`): la ingesta marca la corrida
+   * como FAILED y notifica, igual que un scrape que falló.
+   */
+  private async publishApiResult(source: Source, requestId: string): Promise<void> {
+    let payload: ScraperResultPayload;
+    try {
+      const { items, skipped } = await this.apiSource.fetchItems(source);
+      payload = {
+        schemaVersion: '1',
         requestId,
         sourceId: source.id,
-        sourceName: source.name,
-        intervalMinutes: source.intervalMinutes,
-      },
-      DispatchService.name,
-    );
-    return { requestId };
+        scrapedAt: new Date().toISOString(),
+        error: null,
+        items,
+      };
+      this.logger.log(
+        { msg: 'fuente API consultada', requestId, sourceId: source.id, items: items.length, skipped },
+        DispatchService.name,
+      );
+    } catch (err) {
+      payload = {
+        schemaVersion: '1',
+        requestId,
+        sourceId: source.id,
+        scrapedAt: new Date().toISOString(),
+        error: err instanceof Error ? err.message : String(err),
+        items: [],
+      };
+    }
+
+    try {
+      await this.redis.xadd(STREAMS.RESULTS, '*', 'payload', JSON.stringify(payload));
+    } catch (err) {
+      await this.failDispatch(source, requestId, err);
+      throw err;
+    }
+  }
+
+  /** El mensaje nunca llegó al scraper: se cierra la corrida y se avisa. */
+  private async failDispatch(source: Source, requestId: string, err: unknown): Promise<void> {
+    await this.prisma.scrapeRun.updateMany({
+      where: { requestId },
+      data: { status: 'FAILED', finishedAt: new Date(), error: String(err) },
+    });
+    await this.notifications.create({
+      type: 'SOURCE_ERROR',
+      title: `No se pudo despachar "${source.name}"`,
+      body: `El mensaje no llegó al scraper: ${String(err).slice(0, 200)}`,
+      payload: { sourceId: source.id },
+    });
   }
 }

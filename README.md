@@ -71,6 +71,10 @@ flowchart TD
 - **Fuentes configurables sin tocar código**: se pega una URL y el sistema **verifica el sitio antes de scrapear** y propone la receta de selectores de forma asistida (plantilla conocida → heurística sobre el HTML real → IA como afinador), con **previsualización** de lo detectado para confirmar.
 - **Motores de plantilla** (Computrabajo CO, fixture E2E) + fallback heurístico + fallback IA.
 - **Recetas genéricas**: sumar portales nuevos es pegar URL + selectores desde la UI, no programar un integrador.
+- **Fuentes por API oficial** (`Source.kind = API_JSON`): cuando el portal publica API/RSS, el harness la consulta directo —con la **API key en variable de entorno**, nunca en la base— y mapea su JSON al mismo pipeline (dedup + normalización + match). Esa vía **ni siquiera pasa por el worker Rust**. Plantilla lista: **Jooble** (`POST https://jooble.org/api/{key}`, key gratis), verificada contra la API real.
+- **Reintentos con backoff** en las fuentes de API (`retryAttempts`/`retryDelayMs`): medido que los WAF alternan `200`, `403` y `500` para el **mismo** request, así que sin reintentos una corrida falla al azar. Un `404`/`400` no se reintenta (no se arregla insistiendo).
+- **Fetch realista en Rust**: cabeceras completas de Chrome (client hints, `Sec-Fetch-*`, `Accept-Language`), **cookie jar** (la sesión que se abre en el listado vale para las páginas de detalle), compresión gzip/brotli y HTTP/2. Las cabeceras extra por fuente se configuran en la receta (`headers`).
+- **Diagnóstico honesto del bloqueo**: el probe lee `Cf-Mitigated`, `Server` y `cf-ray` y distingue un **challenge de Cloudflare** ("no se resuelve con headers ni User-Agent: usá la API oficial o una sesión de navegador") de un 403 común o un 429. El mensaje genérico de antes mandaba a cambiar el User-Agent, que en ese caso no sirve.
 - **Cron por perfil**: cada perfil corre *sus* fuentes con su propia cadencia (selector en horas) o un "Buscar ahora" manual.
 - **Polite scraping**: `respectRobots`, delays y límites por fuente.
 
@@ -132,6 +136,9 @@ El listado prioriza lo relevante y se puede acotar con **facetas canónicas** (n
 - **Event-driven de punta a punta**: cada etapa es una cola idempotente con `jobId` determinístico; reintentos con backoff y auto-recuperación (una vacante que quedó `RAW` se re-encola).
 - **N:M de verdad**: perfiles ↔ sitios ↔ vacantes son relaciones muchos-a-muchos; agregar un segundo perfil no duplica datos ni reescribe el flujo.
 - **Facets canónicos + texto original**: filtros confiables sin perder lo que muestra el portal.
+- **No se pelea el WAF**: medido contra Jooble (Cloudflare Turnstile) — tres variantes de headers de navegador y un **Chromium headless** devolvieron el challenge, así que la salida no fue un bypass frágil (cookie `cf_clearance` atada a IP+UA) sino la **API oficial**. El diagnóstico del probe dice exactamente eso en vez de mandar al usuario a probar User-Agents.
+- **Lo mismo aplica al endpoint de la API**: `jooble.org/api/{key}` también está detrás de Cloudflare y alterna `200/403/500` (el host de país, `co.jooble.org/api/{key}`, responde `403` siempre). Por eso las fuentes de API reintentan y **la key sigue siendo válida** aunque una corrida aislada falle.
+- **La key, fuera de la base**: las fuentes de API referencian la variable de entorno por nombre (`authEnv`), igual que el resto de secretos del proyecto.
 - **Medidor ATS determinístico**: reproducible y explicable; la IA propone, el usuario decide.
 - **PDF en el cliente**: un solo motor para preview y descarga, sin Chromium ni servicios extra.
 - **Infra compartida**: reutiliza la **Redis** y el **Postgres/pgvector** del proyecto hermano (`atiende`) en la red `microservices-network`, con `QUEUE_PREFIX` para no pisar sus colas. El compose **solo** levanta lo de la app (api + scraper): ni base de datos ni Redis propios.
@@ -226,8 +233,14 @@ REST con **Swagger en `/api/docs`**, autenticada con el **mismo JWT** de `atiend
 ## Verificación
 
 ```bash
-# API: 159 tests (vitest)
+# API: 188 tests (vitest)
 cd apps/api && npx vitest run
+
+# Scraper Rust: motor de recetas + cabeceras de navegador
+cd apps/scraper && cargo test
+
+# ¿Este portal le responde al cliente real del scraper? (mismo cliente del worker)
+cd apps/scraper && cargo run --example probe_url -- https://co.computrabajo.com/trabajo-de-desarrollador-y-programador
 
 # PDF: renderiza HV + carta y comprueba fuentes embebidas y texto extraíble
 cd dashboard && npm run pdf:check
@@ -265,6 +278,7 @@ Todas documentadas en **[`.env.example`](./.env.example)**, con checklist listo 
 | `QUEUE_PREFIX` | Prefijo de colas (default `cvharness`, no pisa `atiende:dev`) |
 | `DEEPSEEK_API_KEY` · `LLM_PROVIDER` | IA principal (`auto|deepseek|groq|mock`) |
 | `OPENAI_API_KEY` · `EMBEDDING_MODEL` | Embeddings de la HV y de las vacantes |
+| `JOOBLE_API_KEY` | API oficial de Jooble (solo si creás esa fuente `API_JSON`) |
 | `JWT_SECRET` | **El mismo de `atiende` en el server** (una sola sesión) |
 | `MATCH_MIN_SCORE` | Umbral para generar HV automáticamente |
 | `CRON_INTERVAL_MINUTES` | Cadencia del ciclo de crawl |
@@ -275,14 +289,15 @@ Todas documentadas en **[`.env.example`](./.env.example)**, con checklist listo 
 ## Roadmap / deuda conocida
 
 - **Aislamiento por usuario**: hoy todos los perfiles se ven desde el dashboard; el plan (ADR `docs/adr-002-aislamiento-por-usuario.md`) es asociar `Profile.ownerId` al `sub` del JWT compartido. Diseñado, **no implementado**.
-- Cola de mensajes muertos (DLQ), feature flags `FEATURE_*`, router LLM con presupuesto y fallback, notificación Email/Telegram, fuentes RSS/JSON/LinkedIn, graceful shutdown del scraper.
+- **Huella TLS (JA3/JA4) en el scraper**: hoy el fetch es realista en headers, cookies, compresión y HTTP/2, pero su ClientHello sigue siendo el de `rustls`. Los portales que bloquean por huella (no por challenge) necesitan un cliente con TLS de Chrome (`wreq`/`chromimic`, BoringSSL). **Medido y postergado a propósito**: BoringSSL exige `cmake` + `nasm` + toolchain C, que no están en el entorno — habilitarlo implica tocar el `Dockerfile` del scraper y romper el build nativo. No aplica a Jooble, que es challenge y se resuelve por API.
+- Otros pendientes: fuentes **RSS** y LinkedIn, cola de mensajes muertos (DLQ), feature flags `FEATURE_*`, notificación Email/Telegram, graceful shutdown del scraper.
 - 4 errores de ESLint del dashboard (reglas nuevas de React en `usePoll`/efectos) y vulnerabilidades `npm audit` preexistentes en `next`/`postcss`/`sharp`.
 
 ---
 
 ## Uso y cumplimiento
 
-Cada fuente es **configurable** y respeta `respectRobots`; los delays y límites evitan bombardear los sitios. El uso es **personal**: nada de reventa de datos ni de saltarse autenticaciones. Para portales que prohíben el scraping o exigen login, el flujo recomendado es **pegar la oferta** y dejar que el mismo pipeline haga el resto.
+Cada fuente es **configurable** y respeta `respectRobots`; los delays y límites evitan bombardear los sitios. El uso es **personal**: nada de reventa de datos ni de saltarse autenticaciones. Cuando un portal está detrás de un **WAF con challenge** (Cloudflare Turnstile, DataDome…), la vía es su **API/RSS oficial** —el harness la soporta como fuente `API_JSON`— o **pegar la oferta** a mano; no se implementó ningún bypass de protecciones. Para portales que exigen login, el flujo recomendado sigue siendo pegar la oferta y dejar que el mismo pipeline haga el resto.
 
 ---
 

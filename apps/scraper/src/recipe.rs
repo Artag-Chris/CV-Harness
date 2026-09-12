@@ -57,6 +57,9 @@ pub struct Limits {
     pub user_agent: String,
     #[serde(default)]
     pub respect_robots: bool,
+    /// Cabeceras extra por fuente (ej. `Referer`). Se suman a las de navegador.
+    #[serde(default)]
+    pub headers: Option<std::collections::HashMap<String, String>>,
     /// Nombre del parámetro de paginación (ej. "page"). Cuando está presente,
     /// el motor construye las URLs `?page=N` en vez de seguir un link "next".
     /// Necesario para portales cuya paginación se dibuja con JavaScript.
@@ -85,6 +88,7 @@ impl Default for Limits {
             timeout_ms: default_timeout_ms(),
             user_agent: default_user_agent(),
             respect_robots: false,
+            headers: None,
             page_param: None,
         }
     }

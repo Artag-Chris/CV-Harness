@@ -11,6 +11,8 @@ export interface SourceTemplate {
   label: string;
   hint: string;
   baseUrlDefault: string;
+  /** Tipo de fuente: `HTML_RECIPE` (por defecto) o `API_JSON` (API oficial). */
+  kind?: string;
   selectors: Record<string, unknown>;
   limits: Record<string, unknown>;
 }
@@ -50,6 +52,48 @@ export const SOURCE_TEMPLATES: SourceTemplate[] = [
       // (`curl`, `cv-harness/0.1`): verificado 2026-09.
       userAgent:
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      respectRobots: true,
+    },
+  },
+  {
+    id: 'jooble-api',
+    label: 'Jooble (API oficial)',
+    hint: 'Pegá la URL de búsqueda de Jooble (ej. https://co.jooble.org/SearchResult?ukw=desarrollador). Necesita la variable de entorno JOOBLE_API_KEY; la key se pide gratis en https://jooble.org/api/about. Ojo: el endpoint es siempre jooble.org (el host de país responde 403) y el catálogo es internacional — con location:"Colombia" esta key devolvió 0 resultados, así que el body por defecto NO filtra ubicación.',
+    // Jooble responde 403 a todo cliente que no sea un navegador con challenge
+    // resuelto (Cloudflare Turnstile), así que la vía estable es su API REST.
+    baseUrlDefault: 'https://co.jooble.org',
+    kind: 'API_JSON',
+    selectors: {
+      api: {
+        // La key va en la ruta (formato de Jooble); se inyecta desde el entorno.
+        // El host CON país (co.jooble.org/api/…) queda detrás del challenge: 403.
+        url: 'https://jooble.org/api/{key}',
+        method: 'POST',
+        authEnv: 'JOOBLE_API_KEY',
+        // `{{page}}` lo reemplaza el harness en cada página. Sin `location`:
+        // agregarlo restringe y puede dejar la corrida en 0.
+        body: { keywords: 'desarrollador programador', page: '{{page}}' },
+        itemsPath: 'jobs',
+        mapping: {
+          title: 'title',
+          url: 'link',
+          company: 'company',
+          location: 'location',
+          salary: 'salary',
+          postedAt: 'updated',
+          description: 'snippet',
+          externalId: 'id',
+        },
+      },
+    },
+    limits: {
+      // Una sola página a propósito: el endpoint de Jooble está detrás de
+      // Cloudflare y castiga los requests seguidos (alterna 200/403/500).
+      maxPages: 1,
+      delayMs: 2000,
+      timeoutMs: 20000,
+      retryAttempts: 3,
+      retryDelayMs: 2500,
       respectRobots: true,
     },
   },

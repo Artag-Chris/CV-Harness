@@ -8,23 +8,30 @@ import { Prisma, Source } from '@prisma/client';
 import { z } from 'zod';
 import { PrismaService } from '../../common/prisma.service';
 import { originOf } from '../../common/url.util';
+import { API_SOURCE_KIND, parseApiSpec } from './api-source';
 import { SOURCE_TEMPLATES, type SourceTemplate } from './sources.templates';
 
 /** Re-export para quien importaba las plantillas desde este módulo. */
 export { SOURCE_TEMPLATES, type SourceTemplate };
 
 /**
- * Receta CSS de una fuente. `item` y `title` son el mínimo para extraer algo;
- * el resto es opcional. El editor avanzado del dashboard arma este objeto.
+ * Receta de una fuente. En el camino HTML es la receta CSS (`item` + `title`
+ * obligatorios); en el camino API es `{ api: { … } }`. La validación de forma
+ * depende del `kind`, así que se hace por separado y no en el schema Zod.
  */
-const SelectorRecipeSchema = z
-  .record(z.any())
-  .refine((s) => typeof s?.item === 'string' && s.item.trim().length > 0, {
-    message: 'selectors.item es obligatorio (selector CSS de cada vacante)',
-  })
-  .refine((s) => typeof s?.title === 'string' && s.title.trim().length > 0, {
-    message: 'selectors.title es obligatorio (selector CSS del título)',
-  });
+const SelectorRecipeSchema = z.record(z.any());
+
+/** El camino HTML exige selectores de tarjeta y título. */
+function assertHtmlSelectors(selectors: Record<string, unknown>): void {
+  if (typeof selectors.item !== 'string' || !selectors.item.trim()) {
+    throw new BadRequestException(
+      'selectors.item es obligatorio (selector CSS de cada vacante)',
+    );
+  }
+  if (typeof selectors.title !== 'string' || !selectors.title.trim()) {
+    throw new BadRequestException('selectors.title es obligatorio (selector CSS del título)');
+  }
+}
 
 /** Campos de la última corrida que la UI muestra para diagnosticar fallos. */
 const LAST_RUN_SELECT = {
@@ -44,6 +51,11 @@ const LimitsSchema = z
     respectRobots: z.boolean().default(false),
     // Paginación por parámetro (?page=2) para portales que la dibujan con JS.
     pageParam: z.string().trim().min(1).optional(),
+    // Cabeceras extra por fuente (ej. Referer): se suman a las de navegador.
+    headers: z.record(z.string()).optional(),
+    // Reintentos de las fuentes API_JSON (los WAF alternan bloqueos).
+    retryAttempts: z.number().int().min(1).max(5).optional(),
+    retryDelayMs: z.number().int().min(0).optional(),
   })
   .default({});
 
@@ -54,7 +66,8 @@ const LimitsSchema = z
 
 export const UpsertSourceSchema = z.object({
   name: z.string().min(1),
-  kind: z.string().default('HTML_RECIPE'),
+  // El `kind` puede venir del body o de la plantilla; si no, es HTML con receta.
+  kind: z.string().optional(),
   // Plantilla + URL (dashboard) o selectores manuales (API avanzada).
   templateId: z.string().optional(),
   baseUrl: z.string().url().optional(),
@@ -70,6 +83,16 @@ export type UpsertSourceInput = z.infer<typeof UpsertSourceSchema>;
 function resolveTemplate(templateId: string | undefined) {
   if (!templateId) return null;
   return SOURCE_TEMPLATES.find((t) => t.id === templateId) ?? null;
+}
+
+/** Valida la receta según el camino: API oficial o receta CSS. */
+function assertSourceRecipe(kind: string, selectors: Record<string, unknown>): void {
+  if (kind === API_SOURCE_KIND) {
+    const parsed = parseApiSpec(selectors);
+    if (!parsed.ok) throw new BadRequestException(parsed.error);
+    return;
+  }
+  assertHtmlSelectors(selectors);
 }
 
 /**
@@ -150,12 +173,14 @@ export class SourcesService {
         'Se necesita "templateId" (plantilla) o "selectors" (editor avanzado)',
       );
     }
-    const selectors = data.selectors ?? template?.selectors ?? {};
+    const kind = data.kind ?? template?.kind ?? 'HTML_RECIPE';
+    const selectors = (data.selectors ?? template?.selectors ?? {}) as Record<string, unknown>;
     const limits = data.limits ?? template?.limits ?? {};
+    assertSourceRecipe(kind, selectors);
     return this.prisma.source.create({
       data: {
         name: data.name,
-        kind: data.kind,
+        kind,
         // Con receta propia no hay baseUrl: se deriva del origen del listado,
         // para poder absolutizar los href relativos de cada oferta.
         baseUrl: data.baseUrl ?? template?.baseUrlDefault ?? originOf(data.listUrl),
@@ -172,6 +197,12 @@ export class SourcesService {
     const source = await this.prisma.source.findUnique({ where: { id } });
     if (!source) throw new NotFoundException(`Source ${id} no existe`);
     const data = parseOrBadRequest(UpsertSourceSchema.partial(), input);
+    // Cambiar el kind o la receta debe dejar la fuente en un estado usable: si
+    // se pasa a API sin spec (o al revés), se rechaza acá y no en la corrida.
+    if (data.kind !== undefined || data.selectors !== undefined) {
+      const selectors = (data.selectors ?? source.selectors) as Record<string, unknown>;
+      assertSourceRecipe(data.kind ?? source.kind, selectors);
+    }
     return this.prisma.source.update({
       where: { id },
       data: {

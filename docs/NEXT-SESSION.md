@@ -3,6 +3,59 @@
 > Estado: 2026-09-12. Proyecto **cv-harness** + pestaña **CV Harness** en el
 > front `dashboard/` (hermano de atiende).
 
+## SCRAPING POR PÁGINA: API OFICIAL + FETCH REALISTA + DIAGNÓSTICO (2026-09-12, 4ª parte)
+**Disparador**: analizar `https://co.jooble.org/SearchResult?ukw=…` daba `HTTP 403`.
+**Diagnóstico (medido, no supuesto)**: `Cf-Mitigated: challenge` + `Server: cloudflare` +
+`challenges.cloudflare.com` ⇒ **Cloudflare Turnstile**. Tres variantes de curl (sin UA, UA
+Chrome, set completo de headers con client hints) → **403 las tres**; `robots.txt` y
+`sitemap.xml` sí responden 200. Chromium local `--headless=new --dump-dom` → título
+"Un momento…", 28 KB, **cero ofertas**: el headless también cae en el challenge.
+
+### Qué se implementó
+1. **Fuentes por API oficial** (`Source.kind = 'API_JSON'`):
+   - `modules/sources/api-source.ts` (puro): spec Zod (`url` con `{key}`, `method`, `authEnv`,
+     `authQuery`, `headers`, `body`/`query` con `{{page}}`, `itemsPath`, `mapping`),
+     `readPath`, `interpolate`, `buildApiRequest`, `apiRequestHeaders`, `mapApiItems`.
+   - `modules/sources/api-source.service.ts`: fetch con timeout/paginación (`maxPages`, tope 20),
+     **key desde `process.env[authEnv]`** (nunca en la base) y error claro si falta.
+   - `api-source.module.ts` (módulo propio para no crear ciclo Sources ↔ Scheduler).
+   - **Dispatch**: si `kind === API_JSON` se consulta la API y se publica el resultado en
+     `scraper:results` (misma ingesta); un fallo se publica con `error` para que la corrida
+     quede FAILED y notifique. **No pasa por el worker Rust.**
+   - Plantilla **`jooble-api`** (`sources.templates.ts`) + `kind` en `SourceTemplate`;
+     `assertSourceRecipe` valida por camino; `limits.headers` aceptado.
+   - Seed **no** sembrado a propósito: sin `JOOBLE_API_KEY` sería una fuente que falla siempre.
+2. **Fetch realista (Rust)**: `src/http.rs` con `build_client()` (cookie store, gzip/brotli/deflate,
+   redirects limitados) y cabeceras de Chrome por defecto (`engine::fetch` usa `http::get`, el UA
+   por fuente sigue ganando). Límite: el ClientHello sigue siendo `rustls` (ver roadmap del README).
+3. **Diagnóstico del probe**: `common/http.ts` (`browserHeaders`, `browserJsonHeaders`,
+   `diagnoseBlock`) + `looksLikeChallenge()` en `probe/fetch.ts`. Mensaje verificado en vivo:
+   *"El sitio está detrás de Cloudflare con un challenge gestionado (Turnstile)… conviene una
+   fuente por API/RSS oficial"* (antes decía "probá otro User-Agent", que no sirve).
+4. **UI**: modo API en el form de Fuentes (textarea de la spec, sin selectores CSS ni probe),
+   badge "API oficial" en la lista, plantilla etiquetada. **Bug evitado**: editar una fuente API
+   mandaba `recipePayload()` (CSS) y rompía la spec.
+5. **Docs/config**: `.env.example` (raíz y api) con `JOOBLE_API_KEY`; compose ya usa `env_file: .env`.
+
+### Verificación
+`npx vitest run` → **188** tests (27 archivos). `nest build` OK · `cargo test` → 16 OK ·
+`tsc` + `next build` OK. Probe contra Jooble real ejecutado con el build compilado.
+
+### Verificación CON LA KEY REAL (2026-09-12, misma sesión)
+Key de Jooble cargada en `.env` (raíz, la del server) y `apps/api/.env`; ambos en `.gitignore`.
+Medido contra la API real:
+- **Key válida**: `POST https://jooble.org/api/{key}` con `{"keywords":"developer"}` → **20 items**
+  mapeados OK (title, company, location, url, postedAt, snippet, id). Corrida de ~300 ms.
+- **`location:"Colombia"` → 0 resultados**: el catálogo de esta key es internacional/US
+  (Remote, Madrid, Austin, San Francisco…). Por eso el body por defecto **no** filtra ubicación.
+- **`co.jooble.org/api/{key}` → 403 SIEMPRE** (host de país detrás del challenge). El endpoint
+  debe ser `jooble.org`, aunque la URL de búsqueda que se pegue sea de `co.jooble.org`.
+- **Inestabilidad medida**: el mismo request devolvió `200`, `500` (página de error de Jooble con
+  el script de `challenge-platform` de Cloudflare) y `403 Just a moment` en minutos distintos, con
+  y sin headers de navegador ⇒ **no es la key ni los headers: es su WAF**. De ahí los reintentos
+  (`retryAttempts: 3`, `retryDelayMs: 2500`, backoff ×2) y `maxPages: 1` en la plantilla.
+- `diagnoseBlock` ahora explica también `500/502/504` como fallo transitorio del portal.
+
 ## SELECTOR DE IDIOMA (PERFIL + POR HV) (2026-09-12, 3ª parte)
 - **Modelo**: `Profile.applyLanguage String @default("auto")` (migración
   `20260912010000_profile_apply_language`) y `content.language` por borrador
