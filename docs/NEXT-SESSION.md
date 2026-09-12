@@ -32,6 +32,15 @@
   filtros, API, verificación, roadmap).
 - **Ojo para el server**: aplicar la migración nueva (`migrate deploy` corre en
   el boot) — el backfill de facets recalcula las vacantes ya guardadas.
+- **Fix titular del PDF**: un titular largo se montaba sobre el bloque de
+  contacto. Causa: react-pdf mide el ancho con el texto **sin** `textTransform`
+  ni `letterSpacing`, así que "cabía" en el cálculo pero se dibujaba más ancho.
+  Fix en `ResumeDocument.tsx` (`buildHeadline` + estilo `headline`): mayúsculas
+  aplicadas al propio texto, sin tracking, y salto de línea en los separadores
+  `| · •`. Verificado con `pdftotext -bbox`: con el estilo viejo el detector
+  reporta **3 solapamientos** (`CALLING`/`Y`/`RAG` sobre `www.artagdev.com.co`);
+  con el fix, **0**. `scripts/pdf-check.tsx` usa ahora el titular largo como
+  regresión permanente. `ats:verify` y `tsc` siguen OK.
 
 ## LO ÚLTIMO HECHO (verificado en docker, 2026-09-09)
 - **Auth sin 2do login**: la pestaña CV usa la sesión de atiende (`atiende_auth`);
