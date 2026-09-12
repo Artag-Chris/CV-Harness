@@ -6,6 +6,7 @@ import { JsonLogger } from '../../common/json-logger.service';
 import { fingerprint, fingerprintText } from '../../common/hash.util';
 import { PrismaService } from '../../common/prisma.service';
 import { cleanDescription } from '../../common/text.util';
+import { extractJobUrl } from '../../common/url.util';
 import { queueName, QUEUES } from '../../config/queue.config';
 
 /** Mínimo de texto para considerar que es una oferta y no un pegado a medias. */
@@ -55,7 +56,9 @@ export class ManualIntakeService {
     const profileId = await this.resolveProfileId(input.profileId);
     const sourceId = await this.manualSourceId();
 
-    const url = (input.url ?? '').trim();
+    // El aviso puede traer el link embebido (correos de alerta de Indeed, donde
+    // el texto pegado incluye la URL): se usa si no lo dieron por separado.
+    const url = (input.url ?? '').trim() || extractJobUrl(input.text) || '';
     // Con URL se deduplica igual que el scraping (sha256 de la URL); sin URL, por
     // el texto, para que pegar dos veces la misma oferta no cree otra vacante.
     const fp = url ? fingerprint(url) : fingerprintText(cleaned);

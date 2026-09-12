@@ -56,6 +56,54 @@ Medido contra la API real:
   (`retryAttempts: 3`, `retryDelayMs: 2500`, backoff ×2) y `maxPages: 1` en la plantilla.
 - `diagnoseBlock` ahora explica también `500/502/504` como fallo transitorio del portal.
 
+## INDEED POR ALERTAS DE CORREO (2026-09-12, 9ª parte)
+Contexto: se eligió cubrir Indeed con **alertas por email** (raspar Indeed no es viable y Jooble
+no devuelve avisos de Indeed: probado, 20 items de appcast/experteer/ziprecruiter…, 0 de Indeed).
+- **Hueco cerrado**: al pegar el texto del correo, el link del aviso se **descartaba** —
+  `createFromText` solo miraba el campo `url` opcional. La vacante quedaba sin URL ⇒ sin botón
+  «Aplicar ↗» y dedup por texto en vez de por URL.
+- `extractJobUrl()` (en `common/url.util.ts`) saca la primera URL del texto, **descarta** los
+  links de baja/legales/redes que también trae el correo (`unsubscribe`, `preferences`, etc.) y
+  prioriza los que parecen aviso (`viewjob`, `jk=`, `/jobs/`, `/oferta`, `/jdp/`…). Decodifica
+  `&amp;` de un pegado en HTML. En `ManualIntakeService` se usa solo si no dieron `url`.
+- UI: se avisa en «Pegar oferta» que el link se toma del texto.
+- Verificación: API **224 tests** (+9) + `nest build`; dashboard `tsc` 0 + `next build`.
+
+## INDEED / CLOUDFLARE: AGREGADORES CON API (2026-09-12, 8ª parte)
+Pedido: la URL de Indeed (`co.indeed.com/jobs?q=…&vjk=…`) responde 403 de Cloudflare con
+challenge gestionado; se quería la misma salida que con Jooble.
+- **Hecho verificado (web)**: Indeed **no tiene API self-serve** — su Publisher API y su Job
+  Search API están descontinuadas y no entregan keys nuevas (`docs.indeed.com` quedó solo
+  del lado empleador/ATS). Y su HTML está detrás de Cloudflare con challenge: ninguna
+  receta lo lee, no es cosa de headers/UA.
+- **Lo que NO se hizo a propósito**: cookies `cf_clearance` ni navegador headless. La
+  cookie va atada a IP + User-Agent y expira: andaría un rato y volvería el 403.
+- **Nuevo: plantilla «Careerjet / OpcionEmpleo (API oficial)»** (`careerjet-co`). API v4
+  pública, self-serve (registro de publisher), locale `es_CO`, `keywords`, `page`,
+  `page_size`, `sort=date`; agrega avisos de portales que no se pueden raspar.
+  - La API exige **Basic auth** (usuario = key, password vacío) → el spec de fuentes API
+    ahora soporta `auth: 'bearer' | 'basic'` (antes solo Bearer/{key}/authQuery).
+  - Exige además `user_ip` y `user_agent` (van fijos en el `query`; si faltan → 403) y el
+    header `Referer`. Verificado contra el endpoint real: sin key devuelve 401 con
+    «You need to provide your API key via HTTP Basic Auth as username value» — o sea, el
+    esquema implementado es el correcto.
+  - Key: `CAREERJET_API_KEY` (agregada a `.env` y `apps/api/.env`; `.env.example` queda vacío).
+  - **Probado con la key real (2026-09-12)**: la key **autentica** (no da 401), pero la
+    cuenta tiene **allowlist de IPs**: desde la conexión del usuario devuelve
+    `403 { "error": "Unauthorized access from IP 181.63.27.56" }`. No depende del header
+    `Referer` ni del `user_ip` (probado con 4 variantes). ⇒ Autorizar la IP del server en
+    el panel de publisher o correr la fuente desde ahí. Ese texto del error ahora llega a
+    la UI gracias al punto siguiente.
+- **Hint del probe**: `apiTemplateHint()` ahora reconoce `indeed.com`/`linkedin.com` como
+  dominios sin API self-serve y deriva a las plantillas de API **tomadas de
+  `SOURCE_TEMPLATES`** (si mañana se suma otro agregador, aparece solo en el mensaje). Se
+  sigue concatenando al error de challenge, así que se ven los dos mensajes.
+- **Errores de API**: en `!res.ok` ahora se lee el cuerpo y se agrega el motivo
+  (`error|message|detail|error_description`; si es HTML se limpia el markup y se corta a
+  200 chars). Antes el usuario solo veía «HTTP 401» sin la explicación del portal.
+- Verificación: API **215 tests** + `nest build`. Dashboard sin cambios: ya lista las
+  plantillas desde `GET /sources/templates`, así que la nueva aparece en el selector.
+
 ## URLs DE APLICACIÓN RELATIVAS (2026-09-12, 7ª parte)
 Pedido: en la ficha, «Abrir el aviso» mostraba
 `/ofertas-de-trabajo/oferta-…-108A86F64302801261373E686DCF3405#lc=…` (sin dominio), así

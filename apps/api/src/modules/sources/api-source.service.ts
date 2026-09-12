@@ -135,9 +135,13 @@ export class ApiSourceService {
 
       if (!res.ok) {
         const diagnosis = diagnoseBlock(res.status, res.headers);
+        // El cuerpo del error explica más que el status: Careerjet, por ejemplo,
+        // dice si faltó la key, el locale o `user_ip`. Antes se descartaba y el
+        // usuario quedaba con un "HTTP 401" a secas.
+        const detail = await readErrorDetail(res);
         lastError = `La API respondió HTTP ${res.status}.${diagnosis ? ` ${diagnosis}` : ''}${
           res.status === 403 && apiKey ? ' Revisá que la API key siga vigente.' : ''
-        }`;
+        }${detail ? ` Respuesta de la API: ${detail}` : ''}`;
         // Los bloqueos del WAF son intermitentes: se reintenta. Un 404 o un 400
         // no se arreglan reintentando.
         if (RETRYABLE_STATUS.has(res.status)) continue;
@@ -184,4 +188,36 @@ export class ApiSourceService {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Motivo que devolvió la API en un error (`{ "error": "…" }` es lo habitual).
+ * Se corta a 200 caracteres: el mensaje va a la UI, no al log.
+ */
+async function readErrorDetail(res: Response): Promise<string | null> {
+  let text: string;
+  try {
+    text = (await res.text()).trim();
+  } catch {
+    return null;
+  }
+  if (!text) return null;
+
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ['error', 'message', 'detail', 'error_description']) {
+      const value = parsed[key];
+      if (typeof value === 'string' && value.trim()) return truncate(value);
+    }
+    // JSON con otra forma: no se vuelca crudo para no ensuciar el mensaje.
+    return null;
+  } catch {
+    // Un error en HTML/texto plano (típico de un portal que no es API).
+    return truncate(text.replace(/<[^>]*>/g, ' '));
+  }
+}
+
+function truncate(text: string, max = 200): string {
+  const clean = text.replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max)}…` : clean;
 }

@@ -28,4 +28,31 @@ describe('apiTemplateHint', () => {
   it('no explota con una URL inválida', () => {
     expect(apiTemplateHint('no-es-una-url')).toBeNull();
   });
+
+  it('manda a la plantilla de Careerjet cuando el portal es OpcionEmpleo', () => {
+    expect(apiTemplateHint('https://www.opcionempleo.com.co/ofertas-trabajo?q=dev')).toMatch(
+      /Careerjet/,
+    );
+  });
+
+  /**
+   * Indeed es el caso molesto: su HTML está detrás de Cloudflare con challenge y
+   * su API pública está dada de baja, así que la única salida real es un
+   * agregador con API oficial. El mensaje tiene que decirlo y nombrarlos.
+   */
+  it('para Indeed explica que no hay API self-serve y deriva a los agregadores', () => {
+    const hint = apiTemplateHint(
+      'https://co.indeed.com/jobs?q=desarrollador+y+programador&l=&from=searchOnHP&vjk=14994e110cdbc534',
+    );
+    expect(hint).toMatch(/Indeed/);
+    expect(hint).toMatch(/descontinu/i);
+    expect(hint).toMatch(/Jooble/);
+    expect(hint).toMatch(/Careerjet/);
+  });
+
+  it('reconoce también LinkedIn', () => {
+    expect(apiTemplateHint('https://www.linkedin.com/jobs/search/?keywords=dev')).toMatch(
+      /LinkedIn/,
+    );
+  });
 });

@@ -117,6 +117,43 @@ describe('ManualIntakeService.createFromText', () => {
     expect(ctx.vacancies[0]).toMatchObject({ profileId: 'pA' });
   });
 
+  /**
+   * Flujo de las alertas de Indeed por correo: se pega el texto completo del
+   * email —con su link de baja y de preferencias— y el aviso tiene que quedar
+   * con la URL real, para que «Aplicar ↗» funcione y la dedup sea por URL.
+   */
+  it('toma la URL del aviso embebida en el texto pegado', async () => {
+    const ctx = makeService();
+    ctx.profiles.push(...profiles());
+    const email = `${LONG_TEXT}
+
+Ver el empleo: https://co.indeed.com/viewjob?jk=1a2b3c&from=alert
+Cancelar la suscripción: https://subscriptions.indeed.com/unsubscribe?email=x`;
+
+    await ctx.service.createFromText({ text: email });
+
+    expect(ctx.vacancies[0]).toMatchObject({
+      url: 'https://co.indeed.com/viewjob?jk=1a2b3c&from=alert',
+      externalId: 'https://co.indeed.com/viewjob?jk=1a2b3c&from=alert',
+    });
+    // La huella pasa a ser la de la URL (mismo criterio que el scraping).
+    const jobUrl = 'https://co.indeed.com/viewjob?jk=1a2b3c&from=alert';
+    expect(ctx.vacancies[0].fingerprint).toBe(fingerprint(jobUrl));
+  });
+
+  it('si la URL viene aparte, esa manda sobre la del texto', async () => {
+    const ctx = makeService();
+    ctx.profiles.push(...profiles());
+    const email = `${LONG_TEXT}\nVer: https://co.indeed.com/viewjob?jk=del-texto`;
+
+    await ctx.service.createFromText({
+      text: email,
+      url: 'https://co.indeed.com/viewjob?jk=elegida-a-mano',
+    });
+
+    expect(ctx.vacancies[0].url).toBe('https://co.indeed.com/viewjob?jk=elegida-a-mano');
+  });
+
   it('usa el perfil elegido y lo valida', async () => {
     const ctx = makeService();
     ctx.profiles.push(...profiles());

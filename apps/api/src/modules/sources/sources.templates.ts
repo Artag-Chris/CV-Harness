@@ -101,6 +101,55 @@ export const SOURCE_TEMPLATES: SourceTemplate[] = [
     },
   },
   {
+    id: 'careerjet-co',
+    label: 'Careerjet / OpcionEmpleo (API oficial)',
+    hint: 'Agregador con API pública (Colombia = OpcionEmpleo). Sirve para portales que NO se pueden raspar (Indeed, LinkedIn): los indexa y devuelve el enlace al aviso original. Necesita la variable de entorno CAREERJET_API_KEY; la key sale gratis creando una cuenta de publisher en https://www.careerjet.com/partners/register/as-publisher. La API exige `user_ip`/`user_agent` (van fijos en la receta: poné la IP de tu servidor) y el header `Referer`, que debería ser el sitio con el que registraste la cuenta.',
+    baseUrlDefault: 'https://www.opcionempleo.com.co',
+    kind: 'API_JSON',
+    selectors: {
+      api: {
+        // v4: Basic auth (usuario = key, password vacío) y GET con query.
+        url: 'https://search.api.careerjet.net/v4/query',
+        method: 'GET',
+        authEnv: 'CAREERJET_API_KEY',
+        auth: 'basic',
+        headers: { Referer: 'https://example-publisher-site.com/' },
+        query: {
+          locale_code: 'es_CO',
+          keywords: 'desarrollador programador',
+          page: '{{page}}',
+          page_size: '20',
+          // `date` trae lo más reciente primero; con `relevance` se llena de avisos viejos.
+          sort: 'date',
+          // Obligatorios para Careerjet (si faltan: HTTP 403).
+          user_ip: '127.0.0.1',
+          user_agent:
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        },
+        itemsPath: 'jobs',
+        mapping: {
+          title: 'title',
+          // Es su enlace de redirección (jobviewtrack.com): el navegador resuelve
+          // el aviso real, igual que con Jooble.
+          url: 'url',
+          company: 'company',
+          location: 'locations',
+          salary: 'salary',
+          postedAt: 'date',
+          description: 'description',
+        },
+      },
+    },
+    limits: {
+      maxPages: 2,
+      delayMs: 1500,
+      timeoutMs: 20000,
+      retryAttempts: 2,
+      retryDelayMs: 2000,
+      respectRobots: true,
+    },
+  },
+  {
     id: 'jobsdev-fixture',
     label: 'JobsDev Fixture (E2E local)',
     hint: 'http://cvharness-fixture/jobs.html dentro de docker, o localhost:8090/jobs.html nativo',

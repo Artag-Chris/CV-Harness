@@ -7,6 +7,7 @@ import {
   readPath,
   unwrapApiSpec,
 } from '../src/modules/sources/api-source';
+import { SOURCE_TEMPLATES } from '../src/modules/sources/sources.templates';
 
 /**
  * Fuentes por API oficial. Lo crítico: la key sale del entorno y nunca de la BD,
@@ -80,6 +81,25 @@ describe('armado de la petición', () => {
     if (!parsed.ok) throw new Error('spec inválida');
     const headers = apiRequestHeaders(parsed.spec, 'SECRET', {});
     expect(headers.Authorization).toBeUndefined();
+  });
+
+  it('con auth basic manda usuario=key y password vacío', () => {
+    const parsed = parseApiSpec({
+      api: {
+        url: 'https://search.api.careerjet.net/v4/query',
+        method: 'GET',
+        authEnv: 'CAREERJET_API_KEY',
+        auth: 'basic',
+        mapping: { title: 'title', url: 'url' },
+      },
+    });
+    if (!parsed.ok) throw new Error('spec inválida');
+    const headers = apiRequestHeaders(parsed.spec, 'K', {});
+
+    expect(headers.Authorization).toBe('Basic Szo=');
+    expect(Buffer.from(headers.Authorization!.replace('Basic ', ''), 'base64').toString()).toBe(
+      'K:',
+    );
   });
 });
 
@@ -193,5 +213,83 @@ describe('mapeo de items', () => {
     );
     expect(items[0].location).toBe('Medellín');
     expect(items[0].salary).toBe('Full-time, Senior');
+  });
+});
+
+/**
+ * La plantilla de Careerjet es la vía para los portales que no se pueden raspar
+ * (Indeed, LinkedIn). Como no se puede probar sin key, se fija acá el contrato
+ * documentado de la API v4: Basic auth, locale es_CO, `user_ip`/`user_agent`
+ * obligatorios (sin ellos responde 403) y el mapeo del array `jobs`.
+ */
+describe('plantilla Careerjet / OpcionEmpleo', () => {
+  const template = SOURCE_TEMPLATES.find((tpl) => tpl.id === 'careerjet-co');
+
+  function spec() {
+    if (!template) throw new Error('falta la plantilla careerjet-co');
+    const parsed = parseApiSpec(template.selectors);
+    if (!parsed.ok) throw new Error(parsed.error);
+    return parsed.spec;
+  }
+
+  it('queda como fuente API con Basic auth y locale de Colombia', () => {
+    expect(template?.kind).toBe('API_JSON');
+    const parsed = spec();
+    expect(parsed.auth).toBe('basic');
+    expect(parsed.url).toBe('https://search.api.careerjet.net/v4/query');
+    expect(parsed.method).toBe('GET');
+
+    const req = buildApiRequest(parsed, 2, 'KEY');
+    expect(req.url).toContain('locale_code=es_CO');
+    expect(req.url).toContain('keywords=desarrollador');
+    expect(req.url).toContain('page=2');
+    // Obligatorios: sin ellos la API responde 403.
+    expect(req.url).toContain('user_ip=');
+    expect(req.url).toContain('user_agent=');
+
+    const headers = apiRequestHeaders(parsed, 'KEY', {});
+    expect(headers.Authorization).toBe(`Basic ${Buffer.from('KEY:').toString('base64')}`);
+    expect(headers.Referer).toBeTruthy();
+  });
+
+  it('traduce un payload de la API (array jobs)', () => {
+    const json = {
+      type: 'JOBS',
+      hits: 1,
+      pages: 1,
+      jobs: [
+        {
+          title: 'Desarrollador Full Stack',
+          company: 'ACME SAS',
+          date: 'Wed,15 Nov 2025 19:13:43 GMT',
+          description: 'Buscamos dev con Node y Postgres',
+          locations: 'Bogotá',
+          salary: '$ 8.000.000 - 10.000.000',
+          url: 'https://jobviewtrack.com/v2/abc123',
+        },
+      ],
+    };
+
+    const { items, skipped } = mapApiItems(json, spec(), 'https://www.opcionempleo.com.co');
+
+    expect(skipped).toBe(0);
+    expect(items[0]).toMatchObject({
+      title: 'Desarrollador Full Stack',
+      url: 'https://jobviewtrack.com/v2/abc123',
+      company: 'ACME SAS',
+      location: 'Bogotá',
+      salary: '$ 8.000.000 - 10.000.000',
+      postedAt: 'Wed,15 Nov 2025 19:13:43 GMT',
+      descriptionText: 'Buscamos dev con Node y Postgres',
+    });
+  });
+
+  it('una respuesta de ambigüedad de ubicación (type LOCATIONS) no rompe', () => {
+    const { items } = mapApiItems(
+      { type: 'LOCATIONS', locations: ['Bogotá', 'Bogotá D.C.'], message: 'multiple locations found' },
+      spec(),
+      'https://www.opcionempleo.com.co',
+    );
+    expect(items).toEqual([]);
   });
 });

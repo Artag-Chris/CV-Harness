@@ -148,4 +148,52 @@ describe('ApiSourceService', () => {
     expect(items).toHaveLength(0);
     expect(skipped).toBe(1);
   });
+
+  /**
+   * Regresión: el error del API se descartaba y el usuario solo veía "HTTP 401".
+   * Careerjet (y casi cualquier API) explica en el cuerpo qué falta.
+   */
+  it('muestra el motivo que devolvió la API en el error', async () => {
+    process.env.JOOBLE_API_KEY = 'SECRET';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        jsonResponse(
+          {
+            error:
+              'You did not provide an API key. You need to provide your API key via HTTP Basic Auth as username value.',
+            type: 'ERROR',
+          },
+          401,
+        ),
+      ),
+    );
+
+    const service = new ApiSourceService(logger as never);
+    await expect(service.fetchItems(source as never)).rejects.toThrow(
+      /You did not provide an API key/,
+    );
+  });
+
+  it('un error en HTML no vuelca markup en el mensaje', async () => {
+    process.env.JOOBLE_API_KEY = 'SECRET';
+    // Un Response nuevo por intento: el body se consume al leerlo, y el 502 se
+    // reintenta (en producción cada fetch trae su propia respuesta).
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockImplementation(() =>
+          Promise.resolve(
+            new Response('<html><head><title>502 Bad Gateway</title></head></html>', {
+              status: 502,
+            }),
+          ),
+        ),
+    );
+
+    const service = new ApiSourceService(logger as never);
+    await expect(service.fetchItems(source as never)).rejects.toThrow(/502 Bad Gateway/);
+    await expect(service.fetchItems(source as never)).rejects.not.toThrow(/<html>/);
+  });
 });

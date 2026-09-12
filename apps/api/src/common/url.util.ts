@@ -39,3 +39,26 @@ export function absoluteUrl(
     return raw;
   }
 }
+
+/** Links que traen los correos de alerta y NO son la oferta (baja, legales, redes). */
+const NOISE_URL =
+  /(unsubscribe|optout|opt-out|preferences|privacy|terms|support\.|\/help|facebook\.com|twitter\.com|instagram\.com|youtube\.com|linkedin\.com|google\.com\/maps|doubleclick)/i;
+
+/** Pistas de que el link ES la oferta (Indeed: viewjob/jk=; portales: /oferta…). */
+const JOB_URL = /(viewjob|\bjk=|jobviewtrack|\/jobs?\/|\/oferta|\/empleo|\/vacante|\/rc\/clk|\/jdp\/)/i;
+
+/**
+ * Primera URL de la oferta dentro de un texto pegado.
+ *
+ * Por qué: para los avisos que llegan por correo (alertas de Indeed) el link
+ * viene DENTRO del texto. Sin esto la vacante se guardaba sin URL: se perdía el
+ * botón para aplicar y la dedup por URL. El correo también trae links de baja y
+ * legales, así que se descartan y se prioriza el que parece un aviso.
+ */
+export function extractJobUrl(text: string | null | undefined): string | null {
+  const found = ((text ?? '').match(/https?:\/\/[^\s<>"')\]]+/gi) ?? []).map((raw) =>
+    raw.replace(/&amp;/gi, '&').replace(/[.,;:]+$/, ''),
+  );
+  const candidates = found.filter((url) => !NOISE_URL.test(url));
+  return candidates.find((url) => JOB_URL.test(url)) ?? candidates[0] ?? null;
+}

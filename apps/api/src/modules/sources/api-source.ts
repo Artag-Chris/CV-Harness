@@ -20,6 +20,13 @@ export const ApiSourceSpecSchema = z.object({
   method: HttpMethodSchema.default('POST'),
   /** Variable de entorno con la API key (ej. JOOBLE_API_KEY). */
   authEnv: z.string().trim().min(1).optional(),
+  /**
+   * Cómo viaja la key cuando no va en la URL ni en el query:
+   * - `bearer` (default): `Authorization: Bearer <key>`.
+   * - `basic`: `Authorization: Basic base64(<key>:)` — Careerjet la exige así
+   *   (`curl -u <API_KEY>:`), con el password vacío.
+   */
+  auth: z.enum(['bearer', 'basic']).default('bearer'),
   /** Nombre del query param donde va la key, si va por query. */
   authQuery: z.string().trim().min(1).optional(),
   headers: z.record(z.string()).optional(),
@@ -178,7 +185,10 @@ export function apiRequestHeaders(
   const headers: Record<string, string> = { ...spec.headers };
   const keyInUrl = spec.url.includes('{key}');
   if (apiKey && !keyInUrl && !spec.authQuery) {
-    headers.Authorization = `Bearer ${apiKey}`;
+    headers.Authorization =
+      spec.auth === 'basic'
+        ? `Basic ${Buffer.from(`${apiKey}:`).toString('base64')}`
+        : `Bearer ${apiKey}`;
   }
   return { ...base, ...headers };
 }

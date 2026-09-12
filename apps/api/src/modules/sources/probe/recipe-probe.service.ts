@@ -302,6 +302,17 @@ function defaultLimits(): Record<string, unknown> {
 }
 
 /**
+ * Portales sin API pública self-serve: su HTML está detrás de un WAF con
+ * challenge, así que ninguna receta los va a poder leer. Sus avisos se consiguen
+ * por un agregador con API oficial, que además dice en qué portal vive el aviso.
+ */
+const NO_SELF_SERVE_API: Record<string, string> = {
+  'indeed.com':
+    'Indeed descontinuó su API pública (Publisher y Job Search están dadas de baja y no entregan keys self-serve)',
+  'linkedin.com': 'LinkedIn no expone su búsqueda de vacantes por API pública',
+};
+
+/**
  * ¿Esta URL es de un portal con API oficial? Devuelve el mensaje que manda al
  * usuario a la plantilla correcta: el probe de HTML nunca va a funcionar ahí
  * (el WAF responde con challenge a cualquier cliente que no sea un navegador).
@@ -316,6 +327,16 @@ export function apiTemplateHint(listUrl: string): string | null {
   const template = SOURCE_TEMPLATES.find(
     (tpl) => tpl.kind === 'API_JSON' && tpl.baseUrlDefault.includes(host),
   );
-  if (!template) return null;
-  return `Este portal tiene API oficial: elegí la plantilla «${template.label}» en el selector de plantilla y guardá — no hace falta «Analizar URL».`;
+  if (template) {
+    return `Este portal tiene API oficial: elegí la plantilla «${template.label}» en el selector de plantilla y guardá — no hace falta «Analizar URL».`;
+  }
+
+  const blocked = Object.keys(NO_SELF_SERVE_API).find(
+    (domain) => host === domain || host.endsWith(`.${domain}`),
+  );
+  if (!blocked) return null;
+  const alternatives = SOURCE_TEMPLATES.filter((tpl) => tpl.kind === 'API_JSON')
+    .map((tpl) => `«${tpl.label}»`)
+    .join(' o ');
+  return `${NO_SELF_SERVE_API[blocked]}, así que esta URL no se puede raspar ni con receta (el WAF responde 403 con challenge JS). Camino práctico: los agregadores con API oficial indexan sus avisos — probá ${alternatives} con el mismo cargo, que además te dan el enlace al aviso original.`;
 }
