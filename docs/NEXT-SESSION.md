@@ -3,6 +3,40 @@
 > Estado: 2026-09-12. Proyecto **cv-harness** + pestaña **CV Harness** en el
 > front `dashboard/` (hermano de atiende).
 
+## PREPARACIÓN DE ENTREVISTA POR VACANTE (2026-09-13)
+Pedido: al marcar una vacante como aplicada, que aparezca un botón **«Prepararme para la
+entrevista»** que genere un módulo de preparación **según la vacante** (plan de estudio/repaso,
+preguntas probables, preguntas capciosas y cómo resolverlas) — y solo si se oprime el botón.
+Decisiones acordadas: vive **solo en el detalle**, es **editable y guardado**, y el idioma sigue
+al de la vacante.
+
+- **Modelo** `InterviewPrep` (unique `(vacancyId, profileId)`, `content` JSONB, `source
+  ia|plantilla|editada`, `version`); migración `interview_prep`. Relaciones inversas en
+  `Vacancy`/`Profile`.
+- **Asíncrono por cola** (`QUEUES.INTERVIEW` + `InterviewWorker`, como la HV): la salida es
+  grande y no conviene un HTTP síncrono largo. `POST /vacancies/:id/interview-prep?profileId=`
+  exige `VacancyProfile.status = APPLIED` (si no → 400 «Marcá la vacante como aplicada…»).
+  `PATCH /interview-prep/:id` guarda las ediciones.
+- **Módulo** `modules/interview`: `SYSTEM_PROMPT` inline + `buildUserPrompt` (requisitos y
+  skills de la vacante + **brechas** del match + perfil canónico), `InterviewPrepContentSchema`
+  en `pipeline.types.ts`, y **fallback determinístico** cuando no hay proveedor LLM. Idioma
+  `auto` (sigue el de la vacante; el override del perfil manda encima). Notifica
+  `INTERVIEW_READY`.
+- **Preservar avance**: al regenerar se re-aplica el `done` de temas y checklist que coincide por
+  texto (`withPreservedProgress`), para no perder el trabajo del usuario.
+- **API**: `GET /vacancies/:id` expone `interview` por perfil (mismo criterio que `resume`), y
+  también dentro de `profiles[]`.
+- **UI**: `InterviewPrepPanel` en el detalle, renderizado **solo con `shownStatus === 'APPLIED'`**
+  (gate inverso de «Marcar aplicada»). Sondea la ficha hasta que aparece el plan; secciones en
+  acordeón (resumen/focos, plan de estudio, preguntas probables, capciosas, preguntas al
+  entrevistador + banderas rojas, checklist) con edición y checkboxes que se guardan con debounce.
+- **Tests**: +17 (`interview.service` 13, `interview.controller` 3, +1 en `vacancies.service` por
+  `interview` en el detalle) → **241 en total** (`npx vitest run` verde). `tsc` del API sin
+  errores nuevos (quedan **6 preexistentes**: 2 de top-level await y 4 de aridad del constructor
+  en specs viejos). Dashboard `tsc --noEmit` 0 errores y sin errores de ESLint nuevos.
+- **Ojo para el server**: aplicar la migración (el boot corre `migrate deploy`) y regenerar el
+  client Prisma; sin la tabla, el panel falla al generar.
+
 ## SCRAPING POR PÁGINA: API OFICIAL + FETCH REALISTA + DIAGNÓSTICO (2026-09-12, 4ª parte)
 **Disparador**: analizar `https://co.jooble.org/SearchResult?ukw=…` daba `HTTP 403`.
 **Diagnóstico (medido, no supuesto)**: `Cf-Mitigated: challenge` + `Server: cloudflare` +

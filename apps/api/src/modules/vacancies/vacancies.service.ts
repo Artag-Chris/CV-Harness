@@ -59,6 +59,7 @@ const detailInclude = {
   },
   matches: { include: { profile: { select: { id: true, name: true } } } },
   drafts: { include: { profile: { select: { id: true, name: true } } } },
+  interviewPreps: { include: { profile: { select: { id: true, name: true } } } },
 } satisfies Prisma.VacancyInclude;
 
 type ListRow = Prisma.VacancyGetPayload<{ include: typeof vacancyListInclude }>;
@@ -307,6 +308,8 @@ function mapDetail(v: DetailRow, profileId?: string) {
   const profiles = v.vacancyProfiles.map((vp) => {
     const match = v.matches.find((m) => m.profileId === vp.profile.id) ?? null;
     const resume = v.drafts.find((d) => d.profileId === vp.profile.id) ?? null;
+    const interview =
+      v.interviewPreps.find((p) => p.profileId === vp.profile.id) ?? null;
     return {
       profileId: vp.profile.id,
       profileName: vp.profile.name,
@@ -321,6 +324,7 @@ function mapDetail(v: DetailRow, profileId?: string) {
             content: resume.content,
           }
         : null,
+      interview: interview ? toPublicInterview(interview) : null,
     };
   });
   // Con perfil elegido se muestra SU match y SU HV; sin perfil, el mejor.
@@ -329,12 +333,18 @@ function mapDetail(v: DetailRow, profileId?: string) {
   const bestResume = profileId
     ? (v.drafts.find((d) => d.profileId === profileId) ?? null)
     : (v.drafts.find((d) => d.profileId === bestMatch?.profileId) ?? v.drafts[0] ?? null);
+  const bestInterview = profileId
+    ? (v.interviewPreps.find((p) => p.profileId === profileId) ?? null)
+    : (v.interviewPreps.find((p) => p.profileId === bestMatch?.profileId) ??
+      v.interviewPreps[0] ??
+      null);
 
   return {
     ...v,
     vacancyProfiles: undefined,
     matches: undefined,
     drafts: undefined,
+    interviewPreps: undefined,
     isManual: v.source.kind === 'MANUAL',
     // Link de aplicación ya utilizable (href relativo resuelto contra el portal).
     applyUrl: resolveApplyUrl(v),
@@ -351,6 +361,7 @@ function mapDetail(v: DetailRow, profileId?: string) {
           content: bestResume.content,
         }
       : null,
+    interview: bestInterview ? toPublicInterview(bestInterview) : null,
     profiles,
   };
 }
@@ -366,5 +377,16 @@ function toPublicMatch(m: DetailRow['matches'][number]) {
     gaps: m.gaps,
     applicationStrategy: m.applicationStrategy,
     coverLetterDraft: m.coverLetterDraft,
+  };
+}
+
+function toPublicInterview(p: DetailRow['interviewPreps'][number]) {
+  return {
+    id: p.id,
+    profileId: p.profileId,
+    version: p.version,
+    status: p.status,
+    source: p.source,
+    content: p.content,
   };
 }

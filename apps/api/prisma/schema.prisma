@@ -44,6 +44,7 @@ model Profile {
   resumes     Resume[]
   vacancyProfiles VacancyProfile[]
   matches     MatchResult[]
+  interviewPreps InterviewPrep[]
 
   @@index([isPrimary])
 }
@@ -298,6 +299,7 @@ model Vacancy {
   vacancyProfiles VacancyProfile[]
   matches         MatchResult[]
   drafts          ResumeDraft[]
+  interviewPreps  InterviewPrep[]
 
   @@index([status])
   @@index([sourceId])
@@ -383,12 +385,36 @@ model ResumeDraft {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Preparación de entrevista por vacante + perfil. Se genera a pedido (botón
+// "Prepararme para la entrevista") solo cuando la postulación está APPLIED.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model InterviewPrep {
+  id        String   @id @default(cuid())
+  vacancyId String
+  profileId String
+  // Plan estructurado (JSONB): ver InterviewPrepContentSchema.
+  content   Json
+  status    String   @default("DRAFT") // DRAFT | FINAL
+  source    String   @default("ia") // ia | plantilla | editada
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vacancy Vacancy @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([vacancyId, profileId])
+  @@index([profileId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Notificaciones (bandeja del dashboard; adapters email/telegram en fase 2)
 // ─────────────────────────────────────────────────────────────────────────────
 
 model Notification {
   id        String    @id @default(cuid())
-  type      String // MATCH_READY | RESUME_READY | SCRAPE_ERROR | SOURCE_ERROR | INFO
+  type      String // MATCH_READY | RESUME_READY | INTERVIEW_READY | SCRAPE_ERROR | SOURCE_ERROR | INFO
   title     String
   body      String    @db.Text
   payload   Json      @default("{}")

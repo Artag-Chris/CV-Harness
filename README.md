@@ -99,6 +99,13 @@ flowchart TD
 - Modo **ATS** (una columna, encabezados estándar) conmutables, y propuesta de keywords faltantes asistida por IA **sin guardar** hasta que el usuario revisa.
 - Endurecido contra regresiones reales: un `letterSpacing` en los títulos troceaba las palabras (`PROYECTOS` → `P R OY EC TO S`) y hacía que un ATS no reconociera las secciones; hoy hay un verificador que lo caza.
 
+### 🎤 Preparación de entrevistas
+- **Aparece solo cuando postulaste**: al marcar una vacante como **Aplicada**, la ficha ofrece **"Prepararme para la entrevista"** (nada de planes para ofertas que no te interesan).
+- **Un módulo por vacante y perfil**, generado con IA y a pedido: **plan de estudio/repaso** (tema, por qué importa, qué repasar y un ejercicio), **preguntas probables** con esquema de respuesta, **preguntas capciosas** con por qué engañan y cómo responderlas, **banderas rojas** de la oferta, **preguntas para el entrevistador** y un **checklist** previo.
+- Se apoya en el análisis real: requisitos y skills de la vacante, tus **brechas** del match y tu perfil canónico — no un temario genérico.
+- **Editable y guardado**: marcás tu avance y editás las respuestas sin perderlo (se conserva incluso al regenerar el plan).
+- Sigue el **idioma de la vacante** (o el del perfil si lo forzaste).
+
 ### 🗂️ Filtros de vacantes
 El listado prioriza lo relevante y se puede acotar con **facetas canónicas** (no texto libre):
 - **Por defecto solo buen match** (≥ 70 %, ajustable o desactivable).
@@ -160,11 +167,13 @@ erDiagram
     Profile ||--o{ MatchResult : obtiene
     Vacancy ||--o{ ResumeDraft : genera
     Profile ||--o{ ResumeDraft : redacta
+    Vacancy ||--o{ InterviewPrep : "prepara (por perfil)"
+    Profile ||--o{ InterviewPrep : "prepara"
     Profile ||--o{ Resume : carga
     Resume ||--o{ ResumeChunk : "indexa (pgvector)"
 ```
 
-`Vacancy` guarda el texto original **y** los facets canónicos (`modalityTypes: String[]`, `seniorityLevel`), más `enrichment` (JSONB) con lo extraído por IA. `MatchResult` y `ResumeDraft` son únicos por `(vacancyId, profileId)`.
+`Vacancy` guarda el texto original **y** los facets canónicos (`modalityTypes: String[]`, `seniorityLevel`), más `enrichment` (JSONB) con lo extraído por IA. `MatchResult`, `ResumeDraft` e `InterviewPrep` son únicos por `(vacancyId, profileId)`.
 
 ---
 
@@ -223,6 +232,7 @@ REST con **Swagger en `/api/docs`**, autenticada con el **mismo JWT** de `atiend
 - `GET|POST|PATCH|DELETE /profiles` · `PUT /profiles/:id/sources` · `POST /profiles/:id/run` · `POST /profiles/:id/backfill` · `POST /profiles/:id/import-resume` (parchea el perfil desde el markdown con IA)
 - `GET|POST|PATCH|DELETE /sources` · `POST /sources/probe` (verificación + receta asistida) · `POST /sources/:id/run`
 - `GET /vacancies?...` (filtros: `status`, `profileId`, `q`, `minScore`, **`modality`**, **`seniority`**, **`location`**) · `GET /vacancies/:id` · `POST /vacancies/:id/status` · `POST /vacancies/:id/generate-resume`
+- `POST /vacancies/:id/interview-prep` (genera el plan de entrevista; la vacante debe estar `APPLIED`) · `PATCH /interview-prep/:id` (guarda el plan editado)
 - `POST /vacancies/from-text` (ofertas pegadas a mano)
 - `GET|POST|DELETE /resumes` · `POST /resumes/:id/activate`
 - `PATCH /resumes/:id` · `POST /resumes/:id/refine` · `POST /resumes/:id/translate` (traduce conservando ediciones) · `POST /resumes/:id/cover-letter`

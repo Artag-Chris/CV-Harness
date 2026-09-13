@@ -20,6 +20,7 @@ import { CoverLetterModule } from './modules/cover-letter/cover-letter.module';
 import { ResumeEditModule } from './modules/resume-edit/resume-edit.module';
 import { ManualModule } from './modules/manual/manual.module';
 import { AtsModule } from './modules/ats/ats.module';
+import { InterviewModule } from './modules/interview/interview.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { AtsModule } from './modules/ats/ats.module';
     ResumeEditModule,
     ManualModule,
     AtsModule,
+    InterviewModule,
     HealthModule,
   ],
 })

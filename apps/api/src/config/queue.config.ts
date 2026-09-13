@@ -11,6 +11,7 @@ export const QUEUES = {
   NORMALIZE: 'normalize',
   MATCH: 'match',
   RESUME: 'resume',
+  INTERVIEW: 'interview',
   NOTIFICATION: 'notification',
   RESUME_INDEX: 'resume-index',
 } as const;

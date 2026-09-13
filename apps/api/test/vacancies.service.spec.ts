@@ -121,6 +121,7 @@ describe('VacanciesService.get — detalle por perfil', () => {
     drafts: [
       { id: 'd1', profileId: 'p-otro', version: 1, status: 'DRAFT', content: {} },
     ],
+    interviewPreps: [],
   };
   function makeDetailService() {
     const prisma = {
@@ -146,6 +147,28 @@ describe('VacanciesService.get — detalle por perfil', () => {
       { profileId: 'p-otro', score: 95 },
       { profileId: 'p-juan', score: 40, status: 'APPLIED' },
     ]);
+  });
+
+  it('expone la preparación de entrevista del perfil elegido', async () => {
+    const detail = await makeServiceForRow({
+      ...detailRow,
+      interviewPreps: [
+        {
+          id: 'ip1',
+          profileId: 'p-juan',
+          version: 2,
+          status: 'FINAL',
+          source: 'ia',
+          content: { summary: 'Plan de Juan' },
+          profile: { id: 'p-juan', name: 'Juan' },
+        },
+      ],
+    }).get('v1', 'p-juan');
+
+    expect(detail.interview?.id).toBe('ip1');
+    expect(detail.profiles.find((p) => p.profileId === 'p-juan')?.interview?.id).toBe('ip1');
+    // Al otro perfil no se le atribuye la preparación.
+    expect(detail.profiles.find((p) => p.profileId === 'p-otro')?.interview).toBeNull();
   });
 
   function makeServiceForRow(row: Record<string, unknown>) {

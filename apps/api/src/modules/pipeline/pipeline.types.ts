@@ -43,7 +43,14 @@ export const VacancyJobSchema = z.object({
 export type VacancyJob = z.infer<typeof VacancyJobSchema>;
 
 export const NotificationJobSchema = z.object({
-  type: z.enum(['MATCH_READY', 'RESUME_READY', 'SCRAPE_ERROR', 'SOURCE_ERROR', 'INFO']),
+  type: z.enum([
+    'MATCH_READY',
+    'RESUME_READY',
+    'INTERVIEW_READY',
+    'SCRAPE_ERROR',
+    'SOURCE_ERROR',
+    'INFO',
+  ]),
   title: z.string(),
   body: z.string(),
   payload: z.record(z.unknown()).default({}),
@@ -114,3 +121,46 @@ export const ResumeContentSchema = z.object({
   keywords: z.array(z.string()).default([]),
 });
 export type ResumeContent = z.infer<typeof ResumeContentSchema>;
+
+export const InterviewPrepContentSchema = z.object({
+  summary: z.string().default(''),
+  // Qué prioriza la vacante (temas que conviene dominar antes de la entrevista).
+  focusAreas: z.array(z.string()).default([]),
+  studyPlan: z
+    .array(
+      z.object({
+        topic: z.string(),
+        why: z.string().default(''),
+        resources: z.array(z.string()).default([]),
+        practice: z.string().default(''),
+      }),
+    )
+    .default([]),
+  likelyQuestions: z
+    .array(
+      z.object({
+        question: z.string(),
+        // técnica | conductual | del rol | de la empresa
+        category: z.string().default(''),
+        // Cómo estructurar la respuesta (STAR: situación, tarea, acción, resultado).
+        answerOutline: z.string().default(''),
+      }),
+    )
+    .default([]),
+  trickyQuestions: z
+    .array(
+      z.object({
+        question: z.string(),
+        whyTricky: z.string().default(''),
+        howToAnswer: z.string().default(''),
+      }),
+    )
+    .default([]),
+  // Señales de alerta detectadas en la oferta.
+  redFlags: z.array(z.string()).default([]),
+  questionsToAsk: z.array(z.string()).default([]),
+  checklist: z
+    .array(z.object({ item: z.string(), done: z.boolean().default(false) }))
+    .default([]),
+});
+export type InterviewPrepContent = z.infer<typeof InterviewPrepContentSchema>;
