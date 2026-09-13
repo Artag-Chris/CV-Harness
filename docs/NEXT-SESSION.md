@@ -26,10 +26,14 @@ al de la vacante.
   texto (`withPreservedProgress`), para no perder el trabajo del usuario.
 - **API**: `GET /vacancies/:id` expone `interview` por perfil (mismo criterio que `resume`), y
   también dentro de `profiles[]`.
-- **UI**: `InterviewPrepPanel` en el detalle, renderizado **solo con `shownStatus === 'APPLIED'`**
-  (gate inverso de «Marcar aplicada»). Sondea la ficha hasta que aparece el plan; secciones en
-  acordeón (resumen/focos, plan de estudio, preguntas probables, capciosas, preguntas al
-  entrevistador + banderas rojas, checklist) con edición y checkboxes que se guardan con debounce.
+- **UI**: botón **«Preparación de entrevista» en la barra de acciones** (junto a Aplicar/Regenerar
+  HV/Marcar aplicada/Ignorar), visible solo con `shownStatus === 'APPLIED'`; abre/cierra el módulo
+  (arranca abierto si ya hay plan). `InterviewPrepPanel` sondea la ficha hasta que aparece el plan;
+  secciones en acordeón (resumen/focos, plan de estudio, preguntas probables, capciosas, preguntas
+  al entrevistador + banderas rojas, checklist) con edición y checkboxes que se guardan con debounce.
+- **Pegar oferta (manual)**: el campo **URL de la oferta** ahora está siempre visible (antes vivía
+  escondido en «Datos opcionales»); el backend ya lo aceptaba. Si se deja vacío, se sigue extrayendo
+  el link del propio texto.
 - **Tests**: +17 (`interview.service` 13, `interview.controller` 3, +1 en `vacancies.service` por
   `interview` en el detalle) → **241 en total** (`npx vitest run` verde). `tsc` del API sin
   errores nuevos (quedan **6 preexistentes**: 2 de top-level await y 4 de aridad del constructor
