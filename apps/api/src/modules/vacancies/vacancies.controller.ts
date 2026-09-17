@@ -31,6 +31,7 @@ export class VacanciesController {
     @Query('modality') modality?: string,
     @Query('seniority') seniority?: string,
     @Query('location') location?: string,
+    @Query('duplicates') duplicates?: string,
   ) {
     const parsedMin = minScore != null && minScore !== '' ? Number(minScore) : undefined;
     return this.vacancies.list({
@@ -44,6 +45,8 @@ export class VacanciesController {
       modality: parseModalities(modality),
       seniority: parseSeniorities(seniority),
       location: location?.trim() || undefined,
+      // Por defecto los duplicados se ocultan (se marcan, no se borran).
+      duplicates: duplicates === 'all' || duplicates === 'show' ? duplicates : 'hide',
     });
   }
 
@@ -68,5 +71,14 @@ export class VacanciesController {
   @Post(':id/generate-resume')
   generateResume(@Param('id') id: string, @Query('profileId') profileId?: string) {
     return this.vacancies.enqueueResume(id, profileId);
+  }
+
+  /**
+   * «No es duplicado»: revierte la marca del detector. Si al marcarla se le
+   * había saltado el pipeline, se reprocesa.
+   */
+  @Post(':id/not-duplicate')
+  notDuplicate(@Param('id') id: string) {
+    return this.vacancies.markNotDuplicate(id);
   }
 }

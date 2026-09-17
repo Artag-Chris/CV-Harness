@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { VacancyStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { JsonLogger } from '../../common/json-logger.service';
+import { buildDupKey } from '../../common/dup-key';
 import {
   canonicalModalities,
   canonicalSeniority,
@@ -77,6 +78,13 @@ export class NormalizeService {
         // Facets canónicos: es lo que filtra el listado del dashboard.
         modalityTypes: canonicalModalities(vacancy.modality, extracted.modality),
         seniorityLevel: canonicalSeniority(extracted.seniority, vacancy.title),
+        // La clave de dedup mejora acá: la extracción puede completar la empresa
+        // o la ubicación que el listado no traía.
+        dupKey: buildDupKey({
+          title: vacancy.title,
+          company: vacancy.company ?? extracted.company ?? null,
+          location: vacancy.location ?? extracted.location ?? null,
+        }),
       },
     });
 

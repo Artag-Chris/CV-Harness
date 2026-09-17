@@ -144,7 +144,10 @@ export class MatchService {
 
     await recomputeVacancyAggregate(this.prisma, vacancyId);
 
-    const shouldGenerateResume = score >= env.MATCH_MIN_SCORE;
+    // Único disparador automático de la etapa RESUME. Con AUTO_RESUME_ENABLED=false
+    // la HV solo se genera cuando el usuario la pide desde el dashboard
+    // (POST /vacancies/:id/generate-resume), que no depende de este flag.
+    const shouldGenerateResume = env.AUTO_RESUME_ENABLED && score >= env.MATCH_MIN_SCORE;
     this.logger.log(
       {
         msg: 'match calculado (por perfil)',
@@ -155,6 +158,7 @@ export class MatchService {
         score,
         verdict,
         generateResume: shouldGenerateResume,
+        autoResumeEnabled: env.AUTO_RESUME_ENABLED,
         threshold: env.MATCH_MIN_SCORE,
         provider: this.llm.name,
       },

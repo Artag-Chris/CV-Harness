@@ -78,6 +78,7 @@ flowchart TD
 - **Diagnóstico honesto del bloqueo**: el probe lee `Cf-Mitigated`, `Server` y `cf-ray` y distingue un **challenge de Cloudflare** ("no se resuelve con headers ni User-Agent: usá la API oficial o una sesión de navegador") de un 403 común o un 429. El mensaje genérico de antes mandaba a cambiar el User-Agent, que en ese caso no sirve.
 - **Cron por perfil**: cada perfil corre *sus* fuentes con su propia cadencia (selector en horas) o un "Buscar ahora" manual.
 - **Polite scraping**: `respectRobots`, delays y límites por fuente.
+- **Deduplicación en dos capas**: la **URL canónica** (sin parámetros de tracking, sin `www`, sin fragmento ni barra final) y el **id del portal** evitan crear la fila; el mismo **título + empresa + ubicación** en **otro portal** (Jooble/Careerjet vs el aviso original) se guarda **marcado como duplicado y sin encolar IA**. Un pase periódico (`dedup-cycle`) detecta lo que se escapó. **Nada se borra**: el listado los **oculta** (toggle «Ver duplicados») y hay un botón «No es duplicado» para revertir.
 
 ### 🧠 Match inteligente
 - **Extracción estructurada con IA** (requisitos, deseables, skills, seniority, modalidad).
@@ -87,6 +88,7 @@ flowchart TD
 
 ### 📄 Hojas de vida y cartas
 - **HV generada a medida** por vacante, con una plantilla calcada del CV original (colores, tipografías, QR al portafolio).
+- **Generación a pedido (ahorro de costos)**: con `AUTO_RESUME_ENABLED=false` el pipeline **no** redacta la HV solo; se crea desde el dashboard cuando la pedís (el match y el score se siguen calculando igual).
 - **Importar la HV desde markdown (con IA)**: se pega la HV y el LLM la parsea al **perfil estructurado** (experiencias, proyectos, skills, formación, enlaces) —que es de donde se arma la HV generada—. Reemplaza cada sección **solo si el parseo trae datos**, así un parseo parcial no vacía el perfil.
 - **Carta de presentación** generada por IA (o determinística sin proveedor) y editable.
 - **Selector de idioma**: por perfil (idioma de postulación por defecto: **Auto** = sigue el idioma de la vacante, o forzar **Español/Inglés**) y con **override por HV**. Cambiar el idioma de una HV ya editada la **traduce con IA preservando tus ediciones** (y la carta); el PDF y el medidor ATS usan encabezados en ese idioma.
@@ -173,7 +175,7 @@ erDiagram
     Resume ||--o{ ResumeChunk : "indexa (pgvector)"
 ```
 
-`Vacancy` guarda el texto original **y** los facets canónicos (`modalityTypes: String[]`, `seniorityLevel`), más `enrichment` (JSONB) con lo extraído por IA. `MatchResult`, `ResumeDraft` e `InterviewPrep` son únicos por `(vacancyId, profileId)`.
+`Vacancy` guarda el texto original **y** los facets canónicos (`modalityTypes: String[]`, `seniorityLevel`), más `enrichment` (JSONB) con lo extraído por IA. Para deduplicar guarda `canonicalUrl` (URL sin ruido), `dupKey` (título·empresa·ubicación normalizados) y `duplicateOfId` (auto-relación al aviso canónico). `MatchResult`, `ResumeDraft` e `InterviewPrep` son únicos por `(vacancyId, profileId)`.
 
 ---
 
@@ -231,8 +233,9 @@ REST con **Swagger en `/api/docs`**, autenticada con el **mismo JWT** de `atiend
 - `POST /auth/login`
 - `GET|POST|PATCH|DELETE /profiles` · `PUT /profiles/:id/sources` · `POST /profiles/:id/run` · `POST /profiles/:id/backfill` · `POST /profiles/:id/import-resume` (parchea el perfil desde el markdown con IA)
 - `GET|POST|PATCH|DELETE /sources` · `POST /sources/probe` (verificación + receta asistida) · `POST /sources/:id/run`
-- `GET /vacancies?...` (filtros: `status`, `profileId`, `q`, `minScore`, **`modality`**, **`seniority`**, **`location`**) · `GET /vacancies/:id` · `POST /vacancies/:id/status` · `POST /vacancies/:id/generate-resume`
+- `GET /vacancies?...` (filtros: `status`, `profileId`, `q`, `minScore`, **`modality`**, **`seniority`**, **`location`**, **`duplicates=hide|show|all`**) · `GET /vacancies/:id` · `POST /vacancies/:id/status` · `POST /vacancies/:id/generate-resume` · `POST /vacancies/:id/not-duplicate`
 - `POST /vacancies/:id/interview-prep` (genera el plan de entrevista; la vacante debe estar `APPLIED`) · `PATCH /interview-prep/:id` (guarda el plan editado)
+- `POST /dedup/run` (pase de dedup a mano) · `GET /config` (flags para el dashboard)
 - `POST /vacancies/from-text` (ofertas pegadas a mano)
 - `GET|POST|DELETE /resumes` · `POST /resumes/:id/activate`
 - `PATCH /resumes/:id` · `POST /resumes/:id/refine` · `POST /resumes/:id/translate` (traduce conservando ediciones) · `POST /resumes/:id/cover-letter`
@@ -291,7 +294,9 @@ Todas documentadas en **[`.env.example`](./.env.example)**, con checklist listo 
 | `OPENAI_API_KEY` · `EMBEDDING_MODEL` | Embeddings de la HV y de las vacantes |
 | `JOOBLE_API_KEY` | API oficial de Jooble (solo si creás esa fuente `API_JSON`) |
 | `JWT_SECRET` | **El mismo de `atiende` en el server** (una sola sesión) |
-| `MATCH_MIN_SCORE` | Umbral para generar HV automáticamente |
+| `MATCH_MIN_SCORE` | Umbral de match |
+| `AUTO_RESUME_ENABLED` | `false` = la HV no se genera sola (se crea desde el dashboard); el match sigue igual |
+| `DEDUP_ENABLED` · `DEDUP_INTERVAL_MINUTES` | Dedup de vacantes: encendido y cadencia del pase |
 | `CRON_INTERVAL_MINUTES` | Cadencia del ciclo de crawl |
 | `FIXTURE_ENABLED` | Fixture E2E (solo dev local) |
 

@@ -9,6 +9,8 @@ import { VacanciesService } from './vacancies.service';
   imports: [
     // Permite forzar la generación de HV (por debajo del umbral de match).
     BullModule.registerQueue({ name: queueName(QUEUES.RESUME) }),
+    // «No es duplicado» puede necesitar reprocesar la vacante (normalize).
+    BullModule.registerQueue({ name: queueName(QUEUES.NORMALIZE) }),
   ],
   controllers: [VacanciesController, ResumeController],
   providers: [VacanciesService],

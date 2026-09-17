@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { describe, expect, it } from 'vitest';
 import { fingerprint, fingerprintText } from '../src/common/hash.util';
+import { canonicalizeUrl } from '../src/common/url.util';
 import { ManualIntakeService } from '../src/modules/manual/manual.service';
 
 /**
@@ -53,6 +54,27 @@ function makeService(reused?: Row) {
               (args.where.id != null && v.id === args.where.id),
           ) ?? null,
         );
+      },
+      // El servicio busca por huella/URL canónica (OR) y por dupKey (contenido).
+      findFirst: (args: { where?: Row }) => {
+        const all = reused ? [...vacancies, reused] : vacancies;
+        const where = (args?.where ?? {}) as { OR?: Row[]; dupKey?: string };
+        if (Array.isArray(where.OR)) {
+          return Promise.resolve(
+            all.find((v) =>
+              where.OR!.some((cond) => {
+                const c = cond as { fingerprint?: string; canonicalUrl?: string };
+                if (c.fingerprint != null && v.fingerprint === c.fingerprint) return true;
+                if (c.canonicalUrl != null && v.canonicalUrl === c.canonicalUrl) return true;
+                return false;
+              }),
+            ) ?? null,
+          );
+        }
+        if (where.dupKey != null) {
+          return Promise.resolve(all.find((v) => v.dupKey === where.dupKey) ?? null);
+        }
+        return Promise.resolve(null);
       },
       create: (args: { data: Row }) => {
         const row = { id: `v${++seq}`, ...args.data };
@@ -136,9 +158,10 @@ Cancelar la suscripción: https://subscriptions.indeed.com/unsubscribe?email=x`;
       url: 'https://co.indeed.com/viewjob?jk=1a2b3c&from=alert',
       externalId: 'https://co.indeed.com/viewjob?jk=1a2b3c&from=alert',
     });
-    // La huella pasa a ser la de la URL (mismo criterio que el scraping).
+    // La huella pasa a ser la de la URL CANÓNICA (mismo criterio que el scraping).
     const jobUrl = 'https://co.indeed.com/viewjob?jk=1a2b3c&from=alert';
-    expect(ctx.vacancies[0].fingerprint).toBe(fingerprint(jobUrl));
+    expect(ctx.vacancies[0].fingerprint).toBe(fingerprint(canonicalizeUrl(jobUrl)));
+    expect(ctx.vacancies[0].canonicalUrl).toBe(canonicalizeUrl(jobUrl));
   });
 
   it('si la URL viene aparte, esa manda sobre la del texto', async () => {
@@ -168,7 +191,12 @@ Cancelar la suscripción: https://subscriptions.indeed.com/unsubscribe?email=x`;
 
   it('deduplica por URL (misma huella que el scraping)', async () => {
     const url = 'https://www.linkedin.com/jobs/view/12345';
-    const ctx = makeService({ id: 'v-existente', status: 'NORMALIZED', fingerprint: fingerprint(url) });
+    const ctx = makeService({
+      id: 'v-existente',
+      status: 'NORMALIZED',
+      canonicalUrl: canonicalizeUrl(url),
+      fingerprint: fingerprint(canonicalizeUrl(url)),
+    });
     ctx.profiles.push(...profiles());
 
     const res = await ctx.service.createFromText({ text: LONG_TEXT, url });
@@ -239,7 +267,12 @@ Cancelar la suscripción: https://subscriptions.indeed.com/unsubscribe?email=x`;
 
   it('al reusar una vacante ya normalizada encola el match del perfil', async () => {
     const url = 'https://www.linkedin.com/jobs/view/999';
-    const ctx = makeService({ id: 'v-existente', status: 'NORMALIZED', fingerprint: fingerprint(url) });
+    const ctx = makeService({
+      id: 'v-existente',
+      status: 'NORMALIZED',
+      canonicalUrl: canonicalizeUrl(url),
+      fingerprint: fingerprint(canonicalizeUrl(url)),
+    });
     ctx.profiles.push(...profiles());
 
     await ctx.service.createFromText({ text: LONG_TEXT, url });
@@ -251,7 +284,12 @@ Cancelar la suscripción: https://subscriptions.indeed.com/unsubscribe?email=x`;
 
   it('al reusar una vacante todavía RAW no encola match (lo hará el normalize)', async () => {
     const url = 'https://www.linkedin.com/jobs/view/1000';
-    const ctx = makeService({ id: 'v-cruda', status: 'RAW', fingerprint: fingerprint(url) });
+    const ctx = makeService({
+      id: 'v-cruda',
+      status: 'RAW',
+      canonicalUrl: canonicalizeUrl(url),
+      fingerprint: fingerprint(canonicalizeUrl(url)),
+    });
     ctx.profiles.push(...profiles());
 
     await ctx.service.createFromText({ text: LONG_TEXT, url });

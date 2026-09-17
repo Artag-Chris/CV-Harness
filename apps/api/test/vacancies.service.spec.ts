@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { VacanciesService } from '../src/modules/vacancies/vacancies.service';
 
+/** Colas no usadas en estos casos (el servicio solo las toca en acciones). */
+const stubQueue = { add: () => Promise.resolve({}) } as never;
+
 /**
  * Verifica la construcción del `where` del listado. Se captura lo que el
  * servicio le pasa a Prisma: así el filtro de match queda cubierto sin BD.
@@ -17,7 +20,7 @@ function makeService() {
     },
     $transaction: (ops: Promise<unknown>[]) => Promise.all(ops),
   };
-  return { service: new VacanciesService(prisma as never), captured };
+  return { service: new VacanciesService(prisma as never, stubQueue, stubQueue), captured };
 }
 
 describe('VacanciesService.list — filtro de match', () => {
@@ -102,7 +105,7 @@ function makeServiceWithRows(rows: Record<string, unknown>[]) {
     },
     $transaction: (ops: Promise<unknown>[]) => Promise.all(ops),
   };
-  return { service: new VacanciesService(prisma as never) };
+  return { service: new VacanciesService(prisma as never, stubQueue, stubQueue) };
 }
 
 describe('VacanciesService.get — detalle por perfil', () => {
@@ -122,12 +125,15 @@ describe('VacanciesService.get — detalle por perfil', () => {
       { id: 'd1', profileId: 'p-otro', version: 1, status: 'DRAFT', content: {} },
     ],
     interviewPreps: [],
+    duplicates: [],
+    duplicateOf: null,
+    _count: { duplicates: 0 },
   };
   function makeDetailService() {
     const prisma = {
       vacancy: { findUnique: () => Promise.resolve(detailRow) },
     };
-    return new VacanciesService(prisma as never);
+    return new VacanciesService(prisma as never, stubQueue, stubQueue);
   }
 
   it('sin profileId muestra el mejor match', async () => {
@@ -173,7 +179,7 @@ describe('VacanciesService.get — detalle por perfil', () => {
 
   function makeServiceForRow(row: Record<string, unknown>) {
     const prisma = { vacancy: { findUnique: () => Promise.resolve(row) } };
-    return new VacanciesService(prisma as never);
+    return new VacanciesService(prisma as never, stubQueue, stubQueue);
   }
 
   /**
@@ -272,5 +278,100 @@ describe('VacanciesService.list — filtros de facets', () => {
       seniorityLevel: { in: ['SENIOR'] },
       matches: { some: { profileId: 'p-juan', score: { gte: 70 } } },
     });
+  });
+});
+
+describe('VacanciesService.list — duplicados', () => {
+  it('por defecto oculta los marcados como duplicados', async () => {
+    const { service, captured } = makeService();
+    await service.list({});
+    expect(captured.where).toMatchObject({ duplicateOfId: null });
+  });
+
+  it("con duplicates='show' muestra solo los duplicados", async () => {
+    const { service, captured } = makeService();
+    await service.list({ duplicates: 'show' });
+    expect(captured.where).toMatchObject({ duplicateOfId: { not: null } });
+  });
+
+  it("con duplicates='all' no filtra por duplicado", async () => {
+    const { service, captured } = makeService();
+    await service.list({ duplicates: 'all' });
+    expect(captured.where).not.toHaveProperty('duplicateOfId');
+  });
+});
+
+describe('VacanciesService.markNotDuplicate', () => {
+  const detail = {
+    id: 'v1',
+    title: 'Dev',
+    company: 'Acme',
+    location: null,
+    salary: null,
+    modality: null,
+    modalityTypes: [],
+    seniorityLevel: null,
+    url: 'https://x.com/job/1',
+    raw: {},
+    status: 'RAW',
+    matchScore: null,
+    enrichment: null,
+    source: { id: 's1', name: 'F', baseUrl: null, listUrl: '', kind: 'HTML_RECIPE' },
+    vacancyProfiles: [],
+    matches: [],
+    drafts: [],
+    interviewPreps: [],
+    duplicates: [],
+    duplicateOf: null,
+    _count: { duplicates: 0 },
+  };
+
+  function make(opts: { status: string; duplicateOfId: string | null }) {
+    const updates: Record<string, unknown>[] = [];
+    const normalizeJobs: { data: unknown; opts: { jobId?: string } }[] = [];
+    const prisma = {
+      vacancy: {
+        findUnique: (args: { select?: Record<string, unknown> }) =>
+          Promise.resolve(
+            args.select ? { id: 'v1', status: opts.status, duplicateOfId: opts.duplicateOfId } : detail,
+          ),
+        update: (args: Record<string, unknown>) => {
+          updates.push(args);
+          return Promise.resolve({});
+        },
+      },
+    };
+    const service = new VacanciesService(
+      prisma as never,
+      { add: () => Promise.resolve({}) } as never,
+      {
+        add: (_n: string, data: unknown, o: { jobId?: string }) => {
+          normalizeJobs.push({ data, opts: o });
+          return Promise.resolve({});
+        },
+      } as never,
+    );
+    return { service, updates, normalizeJobs };
+  }
+
+  it('desmarca, recuerda y reprocesa si había quedado sin normalizar', async () => {
+    const { service, updates, normalizeJobs } = make({ status: 'RAW', duplicateOfId: 'v-canon' });
+
+    await service.markNotDuplicate('v1');
+
+    expect(updates[0]).toEqual({
+      where: { id: 'v1' },
+      data: { duplicateOfId: null, dupDismissed: true },
+    });
+    expect(normalizeJobs).toHaveLength(1);
+    expect(normalizeJobs[0].opts.jobId).toBe('normalize-v1');
+  });
+
+  it('no reprocesa si la vacante ya estaba analizada', async () => {
+    const { service, normalizeJobs } = make({ status: 'MATCHED', duplicateOfId: 'v-canon' });
+
+    await service.markNotDuplicate('v1');
+
+    expect(normalizeJobs).toHaveLength(0);
   });
 });

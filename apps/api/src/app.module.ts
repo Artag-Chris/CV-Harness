@@ -21,6 +21,8 @@ import { ResumeEditModule } from './modules/resume-edit/resume-edit.module';
 import { ManualModule } from './modules/manual/manual.module';
 import { AtsModule } from './modules/ats/ats.module';
 import { InterviewModule } from './modules/interview/interview.module';
+import { DedupModule } from './modules/dedup/dedup.module';
+import { AppConfigModule } from './modules/app-config/app-config.module';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { InterviewModule } from './modules/interview/interview.module';
     ManualModule,
     AtsModule,
     InterviewModule,
+    DedupModule,
+    AppConfigModule,
     HealthModule,
   ],
 })

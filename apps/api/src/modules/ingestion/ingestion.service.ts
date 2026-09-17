@@ -5,6 +5,8 @@ import { Prisma, VacancyStatus } from '@prisma/client';
 import { z } from 'zod';
 import { JsonLogger } from '../../common/json-logger.service';
 import { fingerprint } from '../../common/hash.util';
+import { buildDupKey } from '../../common/dup-key';
+import { canonicalizeUrl } from '../../common/url.util';
 import { canonicalModalities } from '../../common/job-facets';
 import { PrismaService } from '../../common/prisma.service';
 import { cleanDescription } from '../../common/text.util';
@@ -100,16 +102,26 @@ export class IngestionService {
     return { itemsNew, itemsFound: items.length };
   }
 
-  /** Crea la vacante si el fingerprint no existe. Devuelve true si fue nueva. */
+  /** Crea la vacante si el aviso no existe ya. Devuelve true si fue nueva. */
   private async ingestItem(
     item: z.infer<typeof ScraperItemSchema>,
     sourceId: string,
     profileId: string | null,
   ): Promise<boolean> {
     const url = (item.url ?? '').trim();
-    const fp = fingerprint(url);
-    const existing = await this.prisma.vacancy.findUnique({
-      where: { fingerprint: fp },
+    // La URL canónica es la que deduplica: sin esto, `?utm_…`, `#fragmento`,
+    // `http` vs `https`, `www` o la barra final creaban una fila nueva para el
+    // MISMO aviso.
+    const canonical = canonicalizeUrl(url);
+    const fp = fingerprint(canonical || url);
+
+    const urlMatches: Prisma.VacancyWhereInput[] = [{ fingerprint: fp }];
+    if (canonical) urlMatches.push({ canonicalUrl: canonical });
+    // El id propio del portal (ej. Jooble) es estable aunque cambie el link.
+    if (item.externalId) urlMatches.push({ sourceId, externalId: item.externalId });
+
+    const existing = await this.prisma.vacancy.findFirst({
+      where: { OR: urlMatches },
       select: { id: true, status: true },
     });
     if (existing) {
@@ -128,6 +140,23 @@ export class IngestionService {
         : cleanDescription(descriptionHtml);
     const postedAt = this.parseDate(item.postedAt);
 
+    const dupKey = buildDupKey({
+      title: item.title,
+      company: item.company,
+      location: item.location,
+    });
+    // Mismo aviso publicado en OTRO portal (Jooble/Careerjet vs el original): se
+    // guarda la fila marcada como duplicada y NO se encola el pipeline, así no
+    // se pagan normalización + match por un aviso que ya está. El usuario puede
+    // revertirlo con «No es duplicado».
+    const duplicateOfId = dupKey
+      ? ((await this.prisma.vacancy.findFirst({
+          where: { dupKey, duplicateOfId: null, dupDismissed: false },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        }))?.id ?? null)
+      : null;
+
     let vacancyId: string | null = null;
     try {
       const vacancy = await this.prisma.vacancy.create({
@@ -135,6 +164,9 @@ export class IngestionService {
           sourceId,
           profileId,
           fingerprint: fp,
+          canonicalUrl: canonical || null,
+          dupKey,
+          duplicateOfId,
           externalId: item.externalId ?? url,
           url,
           title: item.title.trim(),
@@ -167,7 +199,9 @@ export class IngestionService {
       throw err;
     }
 
-    await this.safeEnqueueNormalize(vacancyId);
+    if (vacancyId && !duplicateOfId) {
+      await this.safeEnqueueNormalize(vacancyId);
+    }
     return true;
   }
 

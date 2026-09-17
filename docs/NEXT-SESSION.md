@@ -3,6 +3,53 @@
 > Estado: 2026-09-12. Proyecto **cv-harness** + pestaña **CV Harness** en el
 > front `dashboard/` (hermano de atiende).
 
+## DEDUP DE VACANTES + HV A PEDIDO (2026-09-13, 2ª parte)
+Pedido: (a) identificar las vacantes duplicadas (el mismo aviso reaparecía), y (b) **apagar la
+generación automática de HV** para ahorrar costos, creándola solo cuando el usuario la pide.
+Decisiones acordadas: detección por **URL canónica + id del portal + título/empresa/ubicación**;
+al detectar, **marcar y ocultar** (nada se borra); apagar **solo** la HV automática (el match sigue).
+
+### Dedup
+- **Causa raíz**: el fingerprint era `sha256(url cruda)` — sin canonicalizar. `?utm_…`, `#frag`,
+  `http` vs `https`, `www`, barra final, y sobre todo el **mismo aviso en Jooble/Careerjet vs el
+  portal original**, creaban filas nuevas. El `externalId` del portal se guardaba pero no se usaba.
+- `common/url.util.ts` → `canonicalizeUrl()` (host minúsculas, sin `www`, sin puerto por defecto,
+  sin fragmento, sin parámetros de tracking, query ordenada, sin barra final). **Ojo**: la lista de
+  tracking es corta a propósito — `jk`/`vjk` (Indeed) y `source`/`ref` identifican el aviso; sacarlos
+  fusionaría avisos distintos.
+- `common/dup-key.ts` → `buildDupKey()` = `título|empresa|ubicación` normalizados; `null` sin empresa
+  (un título suelto agruparía avisos distintos).
+- **Ingesta** (`ingestion.service.ts`): busca por `fingerprint` (legado) **OR** `canonicalUrl`
+  **OR** `(sourceId, externalId)`; si el aviso existe, no crea fila. Si no, calcula `dupKey` y, si
+  otro aviso ya la tiene, crea la fila con `duplicateOfId` y **NO encola normalize/match** (ahorra 2
+  llamadas de IA). `normalize.service.ts` recalcula `dupKey` con el enriquecimiento (completa
+  empresa/ubicación). `manual.service.ts` deduplica igual y **reusa** el canónico (no crea filas).
+- **Pase periódico** `modules/dedup/` (`dedup-cycle`, `DEDUP_INTERVAL_MINUTES` + uno al arrancar):
+  hace backfill de `canonicalUrl`/`dupKey` de las filas viejas (con `''` como «ya evaluado» para no
+  re-leerlas siempre) y marca los repetidos contra el más viejo. `POST /dedup/run` a mano.
+- **API/UI**: `GET /vacancies?duplicates=hide|show|all` (**hide** por defecto), badge «Duplicado» +
+  «Ver original» en el listado, toggle «Ver duplicados», banner + **«No es duplicado»** en la ficha
+  (`POST /vacancies/:id/not-duplicate` desmarca, recuerda con `dupDismissed` y reprocesa si quedó RAW).
+- Migración `20260913010000_vacancy_dedup` (columnas `canonicalUrl`/`dupKey`/`duplicateOfId`/
+  `dupDismissed`, índices + FK self).
+
+### HV a pedido
+- `AUTO_RESUME_ENABLED` (default `true`; **puesto en `false`** en `.env` y `apps/api/.env`). Gate
+  único en `match.service.ts`: `env.AUTO_RESUME_ENABLED && score >= env.MATCH_MIN_SCORE`. El botón
+  del dashboard (`POST /vacancies/:id/generate-resume`) no depende del flag.
+- `GET /config` expone los flags para que el dashboard ajuste los textos.
+- **Bug evitado**: en `pegar/page.tsx` el seguimiento sondeaba hasta que apareciera la HV — con la
+  HV automática apagada habría sondeado **para siempre**. Ahora corta al pasar el margen de gracia.
+
+### Verificación
+- API: `npx vitest run` → **270 tests** (35 archivos; +29) verdes. `nest build` OK. `tsc` sin errores
+  nuevos (quedan **2 preexistentes** de top-level await en specs viejos; se arreglaron los 5 de
+  aridad del constructor de `VacanciesService` al sumarle la cola NORMALIZE).
+- Dashboard: `tsc --noEmit` 0 errores, `next build` OK, sin errores de ESLint nuevos.
+- **Ojo para el server**: aplicar la migración (`migrate deploy` corre en el boot), regenerar el
+  client Prisma, y setear `AUTO_RESUME_ENABLED=false` para el ahorro. El primer pase de dedup
+  backfillea las filas viejas.
+
 ## PREPARACIÓN DE ENTREVISTA POR VACANTE (2026-09-13)
 Pedido: al marcar una vacante como aplicada, que aparezca un botón **«Prepararme para la
 entrevista»** que genere un módulo de preparación **según la vacante** (plan de estudio/repaso,

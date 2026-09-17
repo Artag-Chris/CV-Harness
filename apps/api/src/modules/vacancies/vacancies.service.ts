@@ -8,6 +8,9 @@ import type { ModalityType, SeniorityLevel } from '../../common/job-facets';
 import { queueName, QUEUES } from '../../config/queue.config';
 import { recomputeVacancyAggregate } from './aggregate';
 
+/** Qué hacer con los avisos marcados como duplicados. */
+export type DuplicatesFilter = 'hide' | 'show' | 'all';
+
 export interface VacancyListQuery {
   status?: VacancyStatus | 'ALL';
   sourceId?: string;
@@ -23,6 +26,8 @@ export interface VacancyListQuery {
   seniority?: SeniorityLevel[];
   /** Búsqueda por texto en la ubicación (ej. "Bogotá", "Medellín"). */
   location?: string;
+  /** `hide` (default) oculta los duplicados; `show` solo los muestra; `all` todo. */
+  duplicates?: DuplicatesFilter;
 }
 
 const ALLOWED_STATUS: VacancyStatus[] = [
@@ -50,6 +55,9 @@ const vacancyListInclude = {
   drafts: {
     select: { id: true, profileId: true, status: true, version: true, updatedAt: true },
   },
+  // Aviso canónico (si esta fila es un duplicado) y cuántos duplicados tiene.
+  duplicateOf: { select: { id: true, title: true, company: true } },
+  _count: { select: { duplicates: true } },
 } satisfies Prisma.VacancyInclude;
 
 const detailInclude = {
@@ -60,6 +68,9 @@ const detailInclude = {
   matches: { include: { profile: { select: { id: true, name: true } } } },
   drafts: { include: { profile: { select: { id: true, name: true } } } },
   interviewPreps: { include: { profile: { select: { id: true, name: true } } } },
+  duplicateOf: { select: { id: true, title: true, company: true, url: true } },
+  duplicates: { select: { id: true, title: true, company: true, url: true, status: true } },
+  _count: { select: { duplicates: true } },
 } satisfies Prisma.VacancyInclude;
 
 type ListRow = Prisma.VacancyGetPayload<{ include: typeof vacancyListInclude }>;
@@ -70,6 +81,7 @@ export class VacanciesService {
   constructor(
     private readonly prisma: PrismaService,
     @InjectQueue(queueName(QUEUES.RESUME)) private readonly resumeQueue: Queue,
+    @InjectQueue(queueName(QUEUES.NORMALIZE)) private readonly normalizeQueue: Queue,
   ) {}
 
   async list(query: VacancyListQuery) {
@@ -99,6 +111,12 @@ export class VacanciesService {
         ? { modalityTypes: { hasSome: query.modality } }
         : {}),
       ...(query.seniority?.length ? { seniorityLevel: { in: query.seniority } } : {}),
+      // Duplicados: por defecto se ocultan (la fila se marca, no se borra).
+      ...(query.duplicates === 'show'
+        ? { duplicateOfId: { not: null } }
+        : query.duplicates === 'all'
+          ? {}
+          : { duplicateOfId: null }),
       ...(query.location
         ? { location: { contains: query.location, mode: 'insensitive' as const } }
         : {}),
@@ -169,6 +187,41 @@ export class VacanciesService {
 
     await recomputeVacancyAggregate(this.prisma, id);
     return this.get(id, profileId);
+  }
+
+  /**
+   * «No es duplicado»: el detector se equivocó (o el usuario quiere conservar
+   * las dos). Se desmarca y se recuerda para no volver a marcarla.
+   */
+  async markNotDuplicate(id: string) {
+    const vacancy = await this.prisma.vacancy.findUnique({
+      where: { id },
+      select: { id: true, status: true, duplicateOfId: true },
+    });
+    if (!vacancy) throw new NotFoundException(`Vacancy ${id} no existe`);
+
+    await this.prisma.vacancy.update({
+      where: { id },
+      data: { duplicateOfId: null, dupDismissed: true },
+    });
+
+    // Al detectarla como duplicado se le saltó el pipeline (se guardó marcada y
+    // sin normalizar): al revertir hay que procesarla de verdad.
+    if (vacancy.duplicateOfId && vacancy.status === VacancyStatus.RAW) {
+      await this.normalizeQueue.add(
+        'default',
+        { vacancyId: id },
+        {
+          jobId: `normalize-${id}`,
+          attempts: 4,
+          backoff: { type: 'exponential' as const, delay: 3000 },
+          removeOnComplete: { age: 86400, count: 1000 },
+          removeOnFail: { age: 7 * 86400 },
+        },
+      );
+    }
+
+    return this.get(id);
   }
 
   /**
@@ -301,6 +354,9 @@ function mapListRow(v: ListRow, profileId?: string) {
         }
       : null,
     profiles,
+    isDuplicate: !!v.duplicateOfId,
+    duplicateOf: v.duplicateOf ?? null,
+    duplicateCount: v._count?.duplicates ?? 0,
   };
 }
 
@@ -363,6 +419,17 @@ function mapDetail(v: DetailRow, profileId?: string) {
       : null,
     interview: bestInterview ? toPublicInterview(bestInterview) : null,
     profiles,
+    isDuplicate: !!v.duplicateOfId,
+    dupDismissed: v.dupDismissed,
+    duplicateOf: v.duplicateOf ?? null,
+    duplicates: v.duplicates.map((d) => ({
+      id: d.id,
+      title: d.title,
+      company: d.company,
+      url: d.url,
+      status: d.status,
+    })),
+    duplicateCount: v._count?.duplicates ?? 0,
   };
 }
 

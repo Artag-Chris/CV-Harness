@@ -30,12 +30,16 @@ function makeService(opts: {
       findMany: () => Promise.resolve(opts.allVps ?? []),
     },
   };
-  const service = new VacanciesService(prisma as never, {
-    add: (_n: string, data: unknown, o: { jobId?: string }) => {
-      queued.push({ data, opts: o });
-      return Promise.resolve({});
-    },
-  } as never);
+  const service = new VacanciesService(
+    prisma as never,
+    {
+      add: (_n: string, data: unknown, o: { jobId?: string }) => {
+        queued.push({ data, opts: o });
+        return Promise.resolve({});
+      },
+    } as never,
+    { add: () => Promise.resolve({}) } as never,
+  );
   return { service, queued };
 }
 

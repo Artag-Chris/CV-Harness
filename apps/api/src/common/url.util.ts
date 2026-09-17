@@ -62,3 +62,64 @@ export function extractJobUrl(text: string | null | undefined): string | null {
   const candidates = found.filter((url) => !NOISE_URL.test(url));
   return candidates.find((url) => JOB_URL.test(url)) ?? candidates[0] ?? null;
 }
+
+/**
+ * Parámetros que NO cambian la identidad del aviso (tracking/analítica).
+ * Deliberadamente corta: quitar de más fusionaría avisos distintos — en Indeed
+ * `jk`/`vjk` son el id del aviso, y `source`/`ref` a veces seleccionan el board.
+ */
+const TRACKING_PARAMS = new Set([
+  'gclid',
+  'fbclid',
+  'msclkid',
+  'yclid',
+  'dclid',
+  'twclid',
+  'igshid',
+  'li_fat_id',
+  'mc_cid',
+  'mc_eid',
+  '_ga',
+  '_gl',
+]);
+
+/**
+ * URL canónica para deduplicar: mismo aviso ⇒ misma cadena.
+ *
+ * El fingerprint viejo hasheaba la URL cruda, así que `?utm_source=…`, un
+ * `#fragmento`, `http` vs `https`, `www` o la barra final creaban una fila
+ * nueva (el mismo aviso reaparecía). Acá se deja una forma estable: minúsculas,
+ * sin `www`, sin puerto por defecto, sin fragmento, sin parámetros de tracking y
+ * con el resto ordenado y sin barra final.
+ */
+export function canonicalizeUrl(raw: string | null | undefined): string {
+  const value = (raw ?? '').trim();
+  if (!value) return '';
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return value;
+
+  url.hash = '';
+  url.hostname = url.hostname.replace(/^www\./i, '').toLowerCase();
+  if (
+    (url.protocol === 'http:' && url.port === '80') ||
+    (url.protocol === 'https:' && url.port === '443')
+  ) {
+    url.port = '';
+  }
+
+  const kept = [...url.searchParams.entries()]
+    .filter(([key]) => !TRACKING_PARAMS.has(key.toLowerCase()) && !/^utm_/i.test(key))
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  url.search = '';
+  for (const [key, val] of kept) url.searchParams.append(key, val);
+
+  if (url.pathname.length > 1) {
+    url.pathname = url.pathname.replace(/\/+$/, '');
+  }
+  return url.toString();
+}

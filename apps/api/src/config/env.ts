@@ -28,6 +28,18 @@ const envSchema = z.object({
   ADMIN_PASSWORD: z.string().min(6).default('admin1234'),
   CRON_INTERVAL_MINUTES: z.coerce.number().default(15),
   MATCH_MIN_SCORE: z.coerce.number().default(65),
+  // Ahorro de costos: apagar la generación de HV del pipeline. La HV del
+  // dashboard (POST /vacancies/:id/generate-resume) sigue disponible.
+  // Se parsea con enum porque `z.coerce.boolean("false")` daría true.
+  AUTO_RESUME_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  DEDUP_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  DEDUP_INTERVAL_MINUTES: z.coerce.number().default(360),
   FIXTURE_BASE_URL: z.string().default('http://localhost:8090'),
   LLM_PROVIDER: z.enum(['auto', 'groq', 'deepseek', 'mock']).default('auto'),
   EMBEDDING_PROVIDER: z.enum(['auto', 'openai', 'mock']).default('auto'),

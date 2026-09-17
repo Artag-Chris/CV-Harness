@@ -12,6 +12,7 @@ export const QUEUES = {
   MATCH: 'match',
   RESUME: 'resume',
   INTERVIEW: 'interview',
+  DEDUP: 'dedup',
   NOTIFICATION: 'notification',
   RESUME_INDEX: 'resume-index',
 } as const;

@@ -289,6 +289,14 @@ model Vacancy {
   status         VacancyStatus @default(RAW)
   matchScore     Int?
   appliedAt      DateTime?
+  // Dedup: URL canónica (mismo enlace sin ruido de tracking) y clave de
+  // contenido (título|empresa|ubicación normalizados) para detectar el mismo
+  // aviso publicado en otro portal. `duplicateOfId` marca esta fila como
+  // duplicada del aviso canónico (no se borra nada).
+  canonicalUrl  String?
+  dupKey        String?
+  duplicateOfId String?
+  dupDismissed  Boolean @default(false)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -300,10 +308,16 @@ model Vacancy {
   matches         MatchResult[]
   drafts          ResumeDraft[]
   interviewPreps  InterviewPrep[]
+  duplicateOf     Vacancy?          @relation("VacancyDuplicates", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates      Vacancy[]         @relation("VacancyDuplicates")
 
   @@index([status])
   @@index([sourceId])
   @@index([profileId])
+  @@index([canonicalUrl])
+  @@index([dupKey])
+  @@index([duplicateOfId])
+  @@index([sourceId, externalId])
   @@index([seniorityLevel])
   // GIN para el filtro por arrays (hasSome) de modalidad.
   @@index([modalityTypes], type: Gin)

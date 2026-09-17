@@ -1,12 +1,13 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
-import { VacancyStatus } from '@prisma/client';
+import { Prisma, VacancyStatus } from '@prisma/client';
 import { Queue } from 'bullmq';
 import { JsonLogger } from '../../common/json-logger.service';
 import { fingerprint, fingerprintText } from '../../common/hash.util';
+import { buildDupKey } from '../../common/dup-key';
 import { PrismaService } from '../../common/prisma.service';
 import { cleanDescription } from '../../common/text.util';
-import { extractJobUrl } from '../../common/url.util';
+import { canonicalizeUrl, extractJobUrl } from '../../common/url.util';
 import { queueName, QUEUES } from '../../config/queue.config';
 
 /** Mínimo de texto para considerar que es una oferta y no un pegado a medias. */
@@ -59,11 +60,17 @@ export class ManualIntakeService {
     // El aviso puede traer el link embebido (correos de alerta de Indeed, donde
     // el texto pegado incluye la URL): se usa si no lo dieron por separado.
     const url = (input.url ?? '').trim() || extractJobUrl(input.text) || '';
-    // Con URL se deduplica igual que el scraping (sha256 de la URL); sin URL, por
-    // el texto, para que pegar dos veces la misma oferta no cree otra vacante.
-    const fp = url ? fingerprint(url) : fingerprintText(cleaned);
+    // Igual que el scraping: la URL canónica (sin tracking ni fragmento) es la
+    // que deduplica; sin URL, por el texto, para que pegar dos veces no duplique.
+    const canonical = canonicalizeUrl(url);
+    const fp = canonical ? fingerprint(canonical) : fingerprintText(cleaned);
+    const title = this.resolveTitle(input.title, cleaned);
+    const company = (input.company ?? '').trim() || null;
+    const dupKey = buildDupKey({ title, company, location: null });
 
-    const existing = await this.prisma.vacancy.findUnique({ where: { fingerprint: fp } });
+    const urlMatches: Prisma.VacancyWhereInput[] = [{ fingerprint: fp }];
+    if (canonical) urlMatches.push({ canonicalUrl: canonical });
+    const existing = await this.prisma.vacancy.findFirst({ where: { OR: urlMatches } });
     if (existing) {
       // Puede existir para otro perfil: garantizar el match de este.
       await this.ensureMatch(existing.id, profileId);
@@ -74,6 +81,28 @@ export class ManualIntakeService {
       return { vacancyId: existing.id, reused: true, profileId };
     }
 
+    // Mismo aviso ya cargado por otra vía (misma clave de contenido): se reusa el
+    // canónico en vez de crear una fila oculta — pegar no debería duplicar.
+    if (dupKey) {
+      const byContent = await this.prisma.vacancy.findFirst({
+        where: { dupKey, dupDismissed: false },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (byContent) {
+        await this.ensureMatch(byContent.id, profileId);
+        this.logger.log(
+          {
+            msg: 'oferta pegada coincide con una existente (contenido)',
+            vacancyId: byContent.id,
+            profileId,
+          },
+          ManualIntakeService.name,
+        );
+        return { vacancyId: byContent.id, reused: true, profileId };
+      }
+    }
+
     const vacancy = await this.prisma.vacancy.create({
       data: {
         sourceId,
@@ -81,10 +110,12 @@ export class ManualIntakeService {
         // vez de repartirla entre los que vigilan la fuente (acá no hay fuente).
         profileId,
         fingerprint: fp,
+        canonicalUrl: canonical || null,
+        dupKey,
         externalId: url || null,
         url,
-        title: this.resolveTitle(input.title, cleaned),
-        company: (input.company ?? '').trim() || null,
+        title,
+        company,
         descriptionRaw: cleaned,
         // `autoCoverLetter` lo lee la etapa de HV para generar la carta de una.
         raw: { manual: true, autoCoverLetter: true },
