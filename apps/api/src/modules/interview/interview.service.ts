@@ -109,6 +109,7 @@ export class InterviewService {
     const ai = await this.llm.json(
       `${SYSTEM_PROMPT}\n\nIdioma de salida: ${languageInstruction(language)}`,
       this.buildUserPrompt(vacancy, match, profileSnapshot),
+      { stage: 'interview' },
     );
     const generated: PrepContent = ai
       ? InterviewPrepContentSchema.parse(ai)

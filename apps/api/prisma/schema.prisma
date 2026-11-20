@@ -440,6 +440,29 @@ model Notification {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Registro de consumo de IA (tokens de entrada/salida y costo estimado por día)
+// Permite monitorear el gasto y aplicar un tope diario que se reinicia cada día.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AiUsage {
+  id          String   @id @default(cuid())
+  day         String   // YYYY-MM-DD (UTC)
+  stage       String   // normalize | match | resume | cover-letter | refine | translate | ats | interview | import | probe | unknown
+  provider    String   // deepseek | groq | mock
+  model       String
+  tokensIn    Int      @default(0)
+  tokensOut   Int      @default(0)
+  totalTokens Int      @default(0)
+  costUsd     Float    @default(0)
+  latencyMs   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([day])
+  @@index([createdAt])
+  @@index([stage, day])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Auth (un solo admin para el MVP)
 // ─────────────────────────────────────────────────────────────────────────────
 

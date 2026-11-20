@@ -110,6 +110,7 @@ export class ResumeEditService {
       ? await this.llm.json(
           SYSTEM_PROMPT,
           this.buildPrompt(draft.vacancy, current, profileSnapshot, cleanInstruction),
+          { stage: 'refine' },
         )
       : null;
 
@@ -201,6 +202,7 @@ export class ResumeEditService {
         null,
         2,
       )}`,
+      { stage: 'translate' },
     );
 
     if (!ai) {

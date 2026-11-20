@@ -142,7 +142,11 @@ export class ProfileImportService {
       );
     }
 
-    const ai = await this.llm.json(SYSTEM_PROMPT, `HOJA DE VIDA A IMPORTAR:\n\n${text}`);
+    const ai = await this.llm.json(
+      SYSTEM_PROMPT,
+      `HOJA DE VIDA A IMPORTAR:\n\n${text}`,
+      { stage: 'import' },
+    );
     if (!ai) {
       return {
         applied: false,

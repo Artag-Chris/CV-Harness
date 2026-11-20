@@ -74,6 +74,7 @@ export class CoverLetterService {
     const ai = await this.llm.json(
       `${SYSTEM_PROMPT}\n\nIdioma de salida: ${languageInstruction(language)}`,
       this.buildUserPrompt(draft.vacancy, match, profileSnapshot),
+      { stage: 'cover-letter' },
     );
     const aiLetter =
       ai && typeof ai.coverLetter === 'string' && ai.coverLetter.trim().length > 0

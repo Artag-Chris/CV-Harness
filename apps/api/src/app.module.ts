@@ -23,6 +23,7 @@ import { AtsModule } from './modules/ats/ats.module';
 import { InterviewModule } from './modules/interview/interview.module';
 import { DedupModule } from './modules/dedup/dedup.module';
 import { AppConfigModule } from './modules/app-config/app-config.module';
+import { UsageModule } from './modules/usage/usage.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { AppConfigModule } from './modules/app-config/app-config.module';
     InterviewModule,
     DedupModule,
     AppConfigModule,
+    UsageModule,
     HealthModule,
   ],
 })

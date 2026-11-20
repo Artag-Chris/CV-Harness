@@ -255,7 +255,7 @@ export class RecipeProbeService {
       sample,
     ].join('\n');
 
-    const raw = await this.llm.json(system, user);
+    const raw = await this.llm.json(system, user, { stage: 'probe' });
     if (!raw) return null;
 
     const pick = (key: string): string | undefined => {

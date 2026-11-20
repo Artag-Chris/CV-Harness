@@ -1,18 +1,19 @@
 import { Global, Module } from '@nestjs/common';
 import { env } from '../../config/env';
 import { LLM_PROVIDER } from '../../config/tokens';
+import { JsonLogger } from '../../common/json-logger.service';
 import { DeepSeekLlmService } from './deepseek.service';
 import { GroqLlmService } from './groq.service';
 import { MockLlmService } from './mock.service';
+import { LlmUsageService } from './llm-usage.service';
+import { BudgetedLlmService } from './budgeted-llm.service';
 
 /**
  * Fábrica de proveedores LLM detrás del puerto LlmProvider.
  *
- * Cómo agregar otro proveedor (patrón adaptador, sin tocar el pipeline):
- *   1. Crear XxxLlmService implements LlmProvider (json(system, user)).
- *   2. Añadirlo como provider aquí.
- *   3. En config/env.ts: vars de API + incluir Xxx en LLM_PROVIDER / llmMode.
- * El resto del sistema (normalizer, matcher, resume…) no cambia.
+ * El proveedor activo se envuelve en BudgetedLlmService para registrar tokens
+ * de entrada/salida y aplicar el tope diario (LLM_DAILY_TOKEN_LIMIT /
+ * LLM_DAILY_USD_LIMIT) con reinicio automático cada día UTC.
  */
 @Global()
 @Module({
@@ -20,25 +21,33 @@ import { MockLlmService } from './mock.service';
     DeepSeekLlmService,
     GroqLlmService,
     MockLlmService,
+    LlmUsageService,
     {
       provide: LLM_PROVIDER,
       useFactory: (
         deepseek: DeepSeekLlmService,
         groq: GroqLlmService,
         mock: MockLlmService,
+        usage: LlmUsageService,
+        logger: JsonLogger,
       ) => {
-        switch (env.llmMode) {
-          case 'deepseek':
-            return deepseek;
-          case 'groq':
-            return groq;
-          default:
-            return mock;
-        }
+        const inner =
+          env.llmMode === 'deepseek'
+            ? deepseek
+            : env.llmMode === 'groq'
+              ? groq
+              : mock;
+        return new BudgetedLlmService(inner, usage, logger);
       },
-      inject: [DeepSeekLlmService, GroqLlmService, MockLlmService],
+      inject: [
+        DeepSeekLlmService,
+        GroqLlmService,
+        MockLlmService,
+        LlmUsageService,
+        JsonLogger,
+      ],
     },
   ],
-  exports: [LLM_PROVIDER],
+  exports: [LLM_PROVIDER, LlmUsageService],
 })
 export class LlmModule {}

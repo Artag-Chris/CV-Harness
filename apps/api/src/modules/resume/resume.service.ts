@@ -95,6 +95,7 @@ export class ResumeService {
     const ai = await this.llm.json(
       buildSystemPrompt(requestedLanguage),
       this.buildUserPrompt(vacancy, match, profileSnapshot),
+      { stage: 'resume' },
     );
     const content: ResumeContent = ai
       ? ResumeContentSchema.parse(ai)

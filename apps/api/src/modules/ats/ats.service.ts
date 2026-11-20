@@ -89,6 +89,7 @@ export class AtsService {
         null,
         2,
       )}\n\nHECHOS VERIFICADOS DEL PERFIL (única fuente de verdad):\n${profileSnapshot}`,
+      { stage: 'ats' },
     );
 
     if (!ai) {

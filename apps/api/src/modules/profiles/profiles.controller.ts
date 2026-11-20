@@ -16,6 +16,10 @@ import { normalizeApplyLanguage } from '../../common/apply-language';
 import { PrismaService } from '../../common/prisma.service';
 import { DispatchService } from '../scheduler/dispatch.service';
 import { ProfileBackfillService } from './profile-backfill.service';
+import {
+  type CustomResumeInput,
+  ProfileCustomResumeService,
+} from './profile-custom-resume.service';
 import { ProfileImportService } from './profile-import.service';
 
 /** Campos editables de un perfil desde el dashboard. */
@@ -36,6 +40,7 @@ export class ProfilesController {
     private readonly dispatch: DispatchService,
     private readonly backfill: ProfileBackfillService,
     private readonly profileImport: ProfileImportService,
+    private readonly customResume: ProfileCustomResumeService,
   ) {}
 
   @Post()
@@ -295,5 +300,18 @@ export class ProfilesController {
   async run(@Param('id') id: string) {
     const result = await this.dispatch.runProfile(id);
     return { ok: true, ...result };
+  }
+
+  /**
+   * Genera (o refina) una HV personalizada a partir de un prompt libre del
+   * usuario (ej. Full Stack, Backend, AI Engineer, Ciberseguridad), usando
+   * los hechos verificados del perfil.
+   */
+  @Post(':id/custom-resume')
+  customResumeGenerate(
+    @Param('id') id: string,
+    @Body() body: CustomResumeInput,
+  ) {
+    return this.customResume.generate(id, body ?? {});
   }
 }

@@ -56,14 +56,37 @@ export class NormalizeService {
     if (vacancy.status === VacancyStatus.APPLIED || vacancy.status === VacancyStatus.IGNORED) return;
 
     const cleaned = cleanDescription(vacancy.descriptionRaw);
-    const ai = await this.llm.json(SYSTEM_PROMPT, this.buildUserPrompt(vacancy, cleaned));
-    const extracted: NormalizeExtract = ai
-      ? NormalizeExtractSchema.parse(ai)
-      : this.deterministicExtract(vacancy, cleaned);
+    let extracted: NormalizeExtract;
+    let usedAi = false;
+    try {
+      const ai = await this.llm.json(
+        SYSTEM_PROMPT,
+        this.buildUserPrompt(vacancy, cleaned),
+        { stage: 'normalize' },
+      );
+      if (ai) {
+        extracted = NormalizeExtractSchema.parse(ai);
+        usedAi = true;
+      } else {
+        extracted = this.deterministicExtract(vacancy, cleaned);
+      }
+    } catch (err) {
+      // Si el LLM falla (sin saldo, rate limit, timeout, JSON inválido), no se
+      // pierde el scraping: se guarda la extracción determinística básica.
+      this.logger.warn(
+        {
+          msg: 'Normalize LLM falló — usando extracción determinística básica',
+          vacancyId: vacancy.id,
+          err: String(err),
+        },
+        NormalizeService.name,
+      );
+      extracted = this.deterministicExtract(vacancy, cleaned);
+    }
 
     const enrichment = {
       ...extracted,
-      // Campos extraídos que el LLM normaliza mejor que el scrape crudo:
+      mode: usedAi ? 'ai' : 'deterministic',
     };
 
     await this.prisma.vacancy.update({

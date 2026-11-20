@@ -12,6 +12,9 @@ export class AppConfigController {
     return {
       autoResumeEnabled: env.AUTO_RESUME_ENABLED,
       dedupEnabled: env.DEDUP_ENABLED,
+      llmDailyTokenLimit: env.LLM_DAILY_TOKEN_LIMIT,
+      llmDailyUsdLimit: env.LLM_DAILY_USD_LIMIT,
+      llmMaxOutputTokens: env.LLM_MAX_OUTPUT_TOKENS,
     };
   }
 }

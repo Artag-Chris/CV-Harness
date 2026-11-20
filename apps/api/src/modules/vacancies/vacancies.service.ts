@@ -94,16 +94,19 @@ export class VacanciesService {
     // El perfil acota las dos cosas: qué vacantes se ven (las que evaluó) y a
     // qué match se refiere minScore (el SUYO, no el mejor de cualquier perfil).
     const profileScope = query.profileId ? { profileId: query.profileId } : {};
-    const where: Prisma.VacancyWhereInput = {
+    // En estados previos al match (RAW / NORMALIZED) no existe MatchResult:
+    // aplicar minScore ahí siempre devolvería 0 resultados.
+    const isPreMatchStatus =
+      statusFilter === VacancyStatus.RAW || statusFilter === VacancyStatus.NORMALIZED;
+    const applyMinScore =
+      !isPreMatchStatus &&
+      typeof query.minScore === 'number' &&
+      Number.isFinite(query.minScore);
+    const baseWhere: Prisma.VacancyWhereInput = {
       ...(statusFilter ? { status: statusFilter } : {}),
       ...(query.sourceId ? { sourceId: query.sourceId } : {}),
       ...(query.profileId
         ? { vacancyProfiles: { some: { profileId: query.profileId } } }
-        : {}),
-      // Al menos un perfil con match suficiente. Sin esto, todo lo que el
-      // scraping trae (incluido lo que no encaja) inunda la pestaña Vacantes.
-      ...(typeof query.minScore === 'number' && Number.isFinite(query.minScore)
-        ? { matches: { some: { ...profileScope, score: { gte: query.minScore } } } }
         : {}),
       // Modalidad inclusiva: pedir "Remota" trae también las que ofrecen remoto
       // entre varias opciones ("Híbrido / Remoto" → REMOTE + HYBRID).
@@ -129,7 +132,15 @@ export class VacanciesService {
           }
         : {}),
     };
-    const [rows, total] = await this.prisma.$transaction([
+    const where: Prisma.VacancyWhereInput = {
+      ...baseWhere,
+      // Al menos un perfil con match suficiente. Sin esto, todo lo que el
+      // scraping trae (incluido lo que no encaja) inunda la pestaña Vacantes.
+      ...(applyMinScore
+        ? { matches: { some: { ...profileScope, score: { gte: query.minScore } } } }
+        : {}),
+    };
+    const [rows, total, unfilteredTotal] = await this.prisma.$transaction([
       this.prisma.vacancy.findMany({
         where,
         include: vacancyListInclude,
@@ -138,8 +149,15 @@ export class VacanciesService {
         skip: offset,
       }),
       this.prisma.vacancy.count({ where }),
+      ...(applyMinScore ? [this.prisma.vacancy.count({ where: baseWhere })] : []),
     ]);
-    return { rows: rows.map((row) => mapListRow(row, query.profileId)), total, limit, offset };
+    return {
+      rows: rows.map((row) => mapListRow(row, query.profileId)),
+      total,
+      unfilteredTotal: typeof unfilteredTotal === 'number' ? unfilteredTotal : total,
+      limit,
+      offset,
+    };
   }
 
   async get(id: string, profileId?: string) {
@@ -357,6 +375,8 @@ function mapListRow(v: ListRow, profileId?: string) {
     isDuplicate: !!v.duplicateOfId,
     duplicateOf: v.duplicateOf ?? null,
     duplicateCount: v._count?.duplicates ?? 0,
+    isFallback:
+      (v.enrichment as Record<string, unknown> | null)?.mode === 'deterministic',
   };
 }
 

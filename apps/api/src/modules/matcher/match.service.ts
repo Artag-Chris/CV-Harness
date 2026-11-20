@@ -84,14 +84,29 @@ export class MatchService {
     );
     const semanticScore = semantic.bestScore;
 
-    // ── 2) Análisis con IA (o determinístico) ──
-    const ai = await this.llm.json(
-      SYSTEM_PROMPT,
-      this.buildUserPrompt(vacancy, profileSnapshot, semantic),
-    );
-    const outcome = ai
-      ? MatchOutcomeSchema.parse(ai)
-      : await this.deterministicOutcome(vacancy, profileId, profile.name);
+    // ── 2) Análisis con IA (o determinístico si no hay LLM o si falla) ──
+    let outcome: MatchOutcome;
+    try {
+      const ai = await this.llm.json(
+        SYSTEM_PROMPT,
+        this.buildUserPrompt(vacancy, profileSnapshot, semantic),
+        { stage: 'match' },
+      );
+      outcome = ai
+        ? MatchOutcomeSchema.parse(ai)
+        : await this.deterministicOutcome(vacancy, profileId, profile.name);
+    } catch (err) {
+      this.logger.warn(
+        {
+          msg: 'Match LLM falló — usando respaldo determinístico básico',
+          vacancyId,
+          profileId,
+          err: String(err),
+        },
+        MatchService.name,
+      );
+      outcome = await this.deterministicOutcome(vacancy, profileId, profile.name);
+    }
 
     const analysisScore = Math.round(outcome.score);
     // ── 3) Score final híbrido ──

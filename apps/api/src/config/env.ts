@@ -43,6 +43,16 @@ const envSchema = z.object({
   FIXTURE_BASE_URL: z.string().default('http://localhost:8090'),
   LLM_PROVIDER: z.enum(['auto', 'groq', 'deepseek', 'mock']).default('auto'),
   EMBEDDING_PROVIDER: z.enum(['auto', 'openai', 'mock']).default('auto'),
+  // Control de costos y tope diario de IA (0 = sin límite; se reinicia cada día UTC).
+  LLM_DAILY_TOKEN_LIMIT: z.coerce.number().int().min(0).default(0),
+  LLM_DAILY_USD_LIMIT: z.coerce.number().min(0).default(0),
+  // Tope máximo de tokens de salida por llamada (0 = sin tope explícito).
+  LLM_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(0).default(4096),
+  // Override opcional del precio por millón de tokens (USD).
+  LLM_PRICE_INPUT_PER_1M: z
+    .preprocess((v) => (v === '' || v === undefined ? undefined : v), z.coerce.number().min(0).optional()),
+  LLM_PRICE_OUTPUT_PER_1M: z
+    .preprocess((v) => (v === '' || v === undefined ? undefined : v), z.coerce.number().min(0).optional()),
 });
 
 export type RawEnv = z.infer<typeof envSchema>;
