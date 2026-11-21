@@ -1,4 +1,4 @@
-import { detectLanguage, LEGACY_HEADINGS, STANDARD_HEADINGS, type AtsLanguage } from './headings';
+import { detectLanguage, STANDARD_HEADINGS, type AtsLanguage } from './headings';
 import { checkCoverage, extractTargetKeywords, stateFactor, type KeywordSources } from './keywords';
 import { normalizeForAts } from './normalize';
 import type { AtsAnalysis, AtsBreakdown, AtsKeyword, AtsGrade } from './types';
@@ -140,8 +140,8 @@ export function analyzeAts({ content, profile, vacancy }: AnalyzeInput): AtsAnal
   );
 
   const standard = STANDARD_HEADINGS[language];
-  const printedHeading = (id: string) =>
-    atsMode ? standard[id] : (LEGACY_HEADINGS as Record<string, string>)[id];
+  // Ambos modos (2 columnas y Modo ATS) imprimen encabezados localizados estándar.
+  const printedHeading = (id: string) => standard[id];
 
   const sectionsFound: string[] = [];
   const coreScore = meanRatio(
@@ -168,33 +168,15 @@ export function analyzeAts({ content, profile, vacancy }: AnalyzeInput): AtsAnal
   const orderScore = atsMode ? 100 : 40;
   const structureScore = Math.round(recognizedRatio * 100 * 0.7 + orderScore * 0.3);
 
+  const missingCore = CORE_SECTIONS.filter((id) => !present.has(id));
+  if (missingCore.length > 0) {
+    warnings.push(`Faltan secciones que un ATS espera: ${missingCore.join(', ')}.`);
+  }
   if (!atsMode) {
-    const unrecognized = [...CORE_SECTIONS, ...presentOptional].filter(
-      (id) => present.has(id) && !isRecognized(printedHeading(id), id),
-    );
-    if (unrecognized.length > 0) {
-      warnings.push(
-        `Encabezados que un ATS no reconoce: ${unrecognized
-          .map((id) => (LEGACY_HEADINGS as Record<string, string>)[id])
-          .join(', ')}.`,
-      );
-      suggestions.push('Encendé el Modo ATS para usar encabezados estándar.');
-    }
-    const missingCore = CORE_SECTIONS.filter((id) => !present.has(id));
-    if (missingCore.length > 0) {
-      warnings.push(`Faltan secciones que un ATS espera: ${missingCore.join(', ')}.`);
-    }
     warnings.push(
       'La maquetación es de dos columnas: el ATS puede leer la columna derecha después de toda la izquierda.',
     );
-    warnings.push(
-      'El encabezado "WORK EXPERIENCE" encabeza tus proyectos, no tus empleos: un ATS puede confundirlos.',
-    );
-  } else {
-    const missingCore = CORE_SECTIONS.filter((id) => !present.has(id));
-    if (missingCore.length > 0) {
-      warnings.push(`Faltan secciones que un ATS espera: ${missingCore.join(', ')}.`);
-    }
+    suggestions.push('Encendé el Modo ATS para usar una sola columna en orden lineal.');
   }
 
   // ── 3. Contacto ─────────────────────────────────────────────────────────

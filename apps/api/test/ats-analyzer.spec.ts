@@ -151,15 +151,12 @@ describe('analyzeAts — modo ATS vs maquetación heredada', () => {
     expect(ats.score).toBeGreaterThan(legacy.score);
   });
 
-  it('penaliza los encabezados no estándar y las dos columnas', () => {
+  it('penaliza la maquetación de dos columnas frente al Modo ATS', () => {
     const legacy = analyze({ ...fullCv, atsMode: false });
     const structure = legacy.breakdown.find((b) => b.id === 'structure');
-    const order = legacy.breakdown.find((b) => b.id === 'structure');
 
     expect(structure?.score).toBeLessThan(100);
     expect(legacy.warnings.join(' ')).toMatch(/dos columnas/i);
-    expect(legacy.warnings.join(' ')).toMatch(/WORK EXPERIENCE/);
-    expect(order).toBeDefined();
   });
 
   it('en Modo ATS la estructura es perfecta y las advertencias desaparecen', () => {
