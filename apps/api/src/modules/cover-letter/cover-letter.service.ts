@@ -11,6 +11,7 @@ import {
   languageInstruction,
   resolveApplyLanguage,
 } from '../../common/apply-language';
+import { detectLanguage } from '../ats/headings';
 import { LLM_PROVIDER } from '../../config/tokens';
 import { LlmProvider } from '../llm/llm-provider.port';
 import { buildProfileSnapshot } from '../profiles/profile-snapshot';
@@ -66,11 +67,15 @@ export class CoverLetterService {
       buildProfileSnapshot(this.prisma, draft.profileId),
     ]);
 
-    // El idioma de la carta sigue el del borrador/perfil (auto = idioma de la vacante).
-    const language = resolveApplyLanguage(
+    // El idioma de la carta sigue el del borrador/perfil (auto = idioma real de la vacante).
+    const requestedLanguage = resolveApplyLanguage(
       (draft.content as Record<string, unknown> | null)?.language,
       draft.profile.applyLanguage,
     );
+    const language =
+      requestedLanguage === 'auto'
+        ? detectLanguage(draft.vacancy.title, draft.vacancy.descriptionRaw)
+        : requestedLanguage;
     const ai = await this.llm.json(
       `${SYSTEM_PROMPT}\n\nIdioma de salida: ${languageInstruction(language)}`,
       this.buildUserPrompt(draft.vacancy, match, profileSnapshot),

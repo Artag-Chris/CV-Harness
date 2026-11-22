@@ -89,6 +89,41 @@ describe('BudgetedLlmService', () => {
     expect(logger.warn).toHaveBeenCalledOnce();
   });
 
+  it('acciones manuales (resume, translate, custom-resume) NO se bloquean por el tope diario y sí registran consumo', async () => {
+    const inner: LlmProvider = {
+      name: 'deepseek',
+      json: vi.fn(),
+      jsonWithUsage: vi.fn().mockResolvedValue({
+        data: { headline: 'AI Engineer' },
+        model: 'deepseek-chat',
+        usage: { tokensIn: 800, tokensOut: 400, totalTokens: 1200 },
+      }),
+    };
+    const usage = {
+      checkDailyBudget: vi.fn().mockResolvedValue({
+        allowed: false,
+        reason: 'token_limit',
+        day: '2026-11-20',
+        todayTokens: 205_000,
+        todayCostUsd: 0.08,
+        tokenLimit: 200_000,
+        usdLimit: 0,
+        resetAt: '2026-11-21T00:00:00.000Z',
+      }),
+      record: vi.fn().mockResolvedValue(undefined),
+    } as unknown as LlmUsageService;
+
+    const svc = new BudgetedLlmService(inner, usage, logger);
+    const res = await svc.json('sys', 'usr', { stage: 'translate' });
+
+    expect(res).toEqual({ headline: 'AI Engineer' });
+    expect(usage.checkDailyBudget).not.toHaveBeenCalled();
+    expect(inner.jsonWithUsage).toHaveBeenCalledOnce();
+    expect(usage.record).toHaveBeenCalledWith(
+      expect.objectContaining({ stage: 'translate', totalTokens: 1200 }),
+    );
+  });
+
   it('cuando está dentro del tope, llama a la API y registra tokens de entrada/salida y etapa', async () => {
     const inner: LlmProvider = {
       name: 'deepseek',

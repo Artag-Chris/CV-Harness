@@ -9,6 +9,7 @@ import {
   languageInstruction,
   resolveApplyLanguage,
 } from '../../common/apply-language';
+import { detectLanguage } from '../ats/headings';
 import { queueName, QUEUES } from '../../config/queue.config';
 import { LLM_PROVIDER } from '../../config/tokens';
 import { CoverLetterService } from '../cover-letter/cover-letter.service';
@@ -90,10 +91,17 @@ export class ResumeService {
     });
     const previous = (existingDraft?.content ?? {}) as Record<string, unknown>;
     const requestedLanguage = resolveApplyLanguage(previous.language, profile.applyLanguage);
+    // En modo `auto`, detectamos el idioma real de la vacante (título + texto
+    // original): el strategy/perfil están en español, así que sin esto el LLM
+    // veía 90% español y redactaba en español aunque la oferta fuera en inglés.
+    const effectiveLanguage: ApplyLanguage =
+      requestedLanguage === 'auto'
+        ? detectLanguage(vacancy.title, vacancy.descriptionRaw)
+        : requestedLanguage;
 
     const profileSnapshot = await buildProfileSnapshot(this.prisma, profileId);
     const ai = await this.llm.json(
-      buildSystemPrompt(requestedLanguage),
+      buildSystemPrompt(effectiveLanguage),
       this.buildUserPrompt(vacancy, match, profileSnapshot),
       { stage: 'resume' },
     );
@@ -102,7 +110,7 @@ export class ResumeService {
       : await this.deterministicContent(vacancy, profileId, match);
     // Sin LLM el respaldo determinístico es en español: no se declara un idioma
     // forzado para que los encabezados del PDF sigan al contenido real.
-    const language: ApplyLanguage = ai ? requestedLanguage : 'auto';
+    const language: ApplyLanguage = ai ? effectiveLanguage : 'auto';
 
     const markdown = renderResumeMarkdown(content, profile.name);
     const coverLetterFields =
